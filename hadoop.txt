@@ -1,0 +1,289 @@
+1.请简述HDFS读数据流程(https://blog.csdn.net/wypersist/article/details/79797565)
+  1). 使用HDFS提供的客户端开发库，向远程的Namenode发起RPC请求；
+  2). Namenode会根据情况返回文件的部分或者全部block列表，对于每个block，Namenode都会返回有该block拷贝的datanode地址；
+  3). 客户端拿到block的位置信息后调用FSDataInputStream API的read方法并行的读取block信息，block默认有3个副本，所以每一个block只需要从一个副本读取就可以。
+  客户端开发库会选取离客户端最接近的datanode来读取block；
+  4). 读取完当前block的数据后，关闭与当前的datanode连接，并为读取下一个block寻找最佳的datanode；返回给客户端。
+  5). 当读完列表的block后，且文件读取还没有结束，客户端开发库会继续向Namenode获取下一批的block列表。
+  6). 读取完一个block都会进行checksum验证，如果读取datanode时出现错误，客户端会通知Namenode，然后再从下一个拥有该block拷贝的datanode继续读。
+
+2.请简述HDFS写数据流程(https://blog.csdn.net/wypersist/article/details/79797565)
+  1). 使用HDFS提供的客户端开发库，向远程的Namenode发起RPC请求；
+  2). Namenode会检查要创建的文件是否已经存在，创建者是否有权限进行操作，成功则会为文件创建一个记录，否则会让客户端抛出异常;
+  3). 当客户端调用FSDataOutPutStream的write方法开始写入文件的时候，开发库会将文件切分成多个packets（信息包）,并向Namenode申请新的blocks，
+       获取用来存储副本合适的datanodes列表，
+	  列表的大小根据在Namenode中对replication的设置而定。
+  4). 开始以pipeline（管道）的形式将packet写入所有的副本中。开发库把packet以流的方式写入第一个datanode，
+       该datanode把该packet存储之后，再将其传递给在此pipeline（管道）中的下一个datanode，直到最后一个datanode，
+	   这种写数据的方式呈流水线的形式。
+  5). 最后一个datanode成功存储之后会返回一个ack packet，在pipeline里传递至客户端，在客户端的开发库内部维护着"ack queue"，成功收到datanode返回的ack packet后会从"ack queue"移除相应的packet。
+  6). 如果传输过程中，有某个datanode出现了故障，那么当前的pipeline会被关闭，出现故障的datanode会从当前的pipeline中移除，剩余的block会继续剩下的datanode中继续以pipeline的形式传输，同时Namenode会分配一个新的datanode，保持replicas设定的数量。
+ 
+ 
+ 
+
+ 
+ 
+3.HDFS存储机制
+
+1).HDFS开创性设计特点是对文件切割后分别存放
+2).HDFS将要存储的大文件进行切割，切割后存放在既定的存储块（Block）中，并通过预先设定的优化处理，模式对存储的数据进行预处理，从而攻克了大文件储存与计算的需求。
+3).Client：调用HDFS API操作文件;与NN交互获取文件元数据;与DN交互进行数据读写		   
+4).Namenode：元数据节点，是系统唯一的管理者。负责元数据的管理;与client交互进行提供元数据查询;分配数据存储节点等
+5).Datanode：数据存储节点，负责数据块的存储与冗余备份;执行数据块的读写操作等
+6).Block是HDFS的基本存储单元，Hadoop1.x默认大小是64M,Hadoop2.x默认大小是128M.
+7). 当client的读取操作错误发生的时候。client会向NameNode报告错误，并请求NameNode排除错误的DataNode后后又一次依据距离排序。从而获得一个新的DataNode的读取路径。假设全部的DataNode都报告读取失败。那么整个任务就读取失败；
+8). 对于写出操作过程中出现的问题。FSDataOutputStream并不会马上关闭。client向NameNode报告错误信息。并直接向提供备份的DataNode中写入数据
+
+  
+
+4.HDFS副本存储策略
+HDFS的存放策略是将一个副本存放在本地机架节点上，另外两个副本放在另一个机架的不同节点上。
+ 
+
+5.HDFS FSimage和edit合并过程(了解Hadoop2.x的合并过程即可)
+ https://blog.csdn.net/WYpersist/article/details/80069726
+
+6.hdfs上传文件和下载文件的流程(https://blog.csdn.net/WYpersist/article/details/80044958)
+hdfs上传文件:
+1.客户端向NameNode(NN)发送请求上传文件路径
+2.NN响应Client确认是否能够上传文件
+3.Client再次请求NN,上传一个Black块
+4.NN响应Client给予几个要上传的DataNode的地址(有一定的容灾规则)
+5.Client向第一个DataNode请求建立连接进行文件上传,第一个DataNode会向第二个DataNode请求建立连接传输文件 
+  依次到最后一个,通知Client进行文件的传输
+6.Client会将文件分成每个64k的小块进行传输(方便副本间同步,前后副本仅仅差距一个包)
+7.Client上传结束后,如果还有Black块,继续重复3-6过程.直到传输结束
+ 
+hdfs下载文件:
+1.Client向NN请求下载指定目标
+2.NN返回该目标的存储信息(Black块及相应的机器列表)
+3.Client依次向Black块的机器发送数据传输请求,将文件下载到本地进行拼接
+4.直到下载完成.
+ 
+ 
+8.HDFS的常用的数据压缩算法有什么?
+Hadoop中常用的压缩算法有bzip2、gzip、lzo、snappy，其中lzo、snappy需要操作系统安装native库才可以支持
+
+
+MapReduce详解https://blog.csdn.net/weixin_39611553/article/details/82900675
+
+1.请简述下MapReduce的shuffle过程?(参考:https://www.cnblogs.com/DianaCody/p/5425658.html)
+
+Map负责过滤分发，reduce归并整理，从map输出到reduce输入就是shuffle过程;
+map端shuffle:
+①分区partition        在将map()函数处理后得到的（key,value）对写入到环形缓冲区之前，需要先进行分区操作
+② 写入环形内存缓冲区  map的输出结果不会直接写入磁盘,而是先写入环形缓冲区中做一些预排序以提高效率
+③spill溢写 排序sort--->合并combiner--->生成溢出写文件 
+  一旦缓冲区内容达到阈值(超出缓冲区80%)就会溢写到磁盘上,并在每个分区中对其中的键值对按键进行sort排序,
+    还可能会进行combiner操作;
+④归并merge
+5).压缩 写磁盘时压缩map端的输出，因为这样会让写磁盘的速度更快，节约磁盘空间，并减少传给reducer的数据量
+reduce端shuffle 
+①复制copy Reduce进程启动一些copy数据的线程，将map的输出文件copy过来
+②归并merge 将 Map 端复制过来的数据先放入内存缓冲区中， 进行merge操作
+③reduce	当map输出最后一个文件被merge完成之后将结果输出到reduce端执行reduce操作
+	
+Map负责过滤分发,Reduce负责归并整理,从map输出到reduce输入就是shuffle过程;
+ 
+ 
+{Shuffle产生的意义是什么？
+Shuffle过程的期望可以有： 
+完整地从map task端拉取数据到reduce 端。
+在跨节点拉取数据时，尽可能地减少对带宽的不必要消耗。
+减少磁盘IO对task执行的影响。
+
+每个map task都有一个内存缓冲区，存储着map的输出结果，当缓冲区快满的时候需要将缓冲区的数据该如何处理？
+每个map task都有一个内存缓冲区，存储着map的输出结果，当缓冲区快满的时候需要将缓冲区的数据以一个临时文件的方式存放到磁盘，当整个map task结束后再对磁盘中这个map task产生的所有临时文件做合并，生成最终的正式输出文件，然后等待reduce task来拉数据。 
+
+MapReduce提供Partitioner接口，它的作用是什么？
+MapReduce提供Partitioner接口，它的作用就是根据key或value及reduce的数量来决定当前的这对输出数据最终应该交由哪个reduce task处理。默认对key hash后再以reduce task数量取模。默认的取模方式只是为了平均reduce的处理能力，如果用户自己对Partitioner有需求，可以订制并设置到job上。 
+
+什么是溢写？
+在一定条件下将缓冲区中的数据临时写入磁盘，然后重新利用这块缓冲区。这个从内存往磁盘写数据的过程被称为Spill，中文可译为溢写。
+
+
+
+溢写是为什么不影响往缓冲区写map结果的线程？
+溢写线程启动时不应该阻止map的结果输出，所以整个缓冲区有个溢写的比例spill.percent。这个比例默认是0.8，
+也就是当缓冲区的数据已经达到阈值（buffer size * spill percent = 100MB * 0.8 = 80MB），溢写线程启动，锁定这80MB的内存，执行溢写过程。
+Map task的输出结果还可以往剩下的20MB内存中写，互不影响。
+
+
+当溢写线程启动后，需要对这80MB空间内的key做排序(Sort)。排序是MapReduce模型默认的行为，这里的排序也是对谁的排序？
+当溢写线程启动后，需要对这80MB空间内的key做排序(Sort)。排序是MapReduce模型默认的行为，这里的排序也是对序列化的字节做的排序。 
+
+
+
+溢写过程中如果有很多个key/value对需要发送到某个reduce端去，那么如何处理这些key/value值？
+如果有很多个key/value对需要发送到某个reduce端去，那么需要将这些key/value值拼接到一块，减少与partition相关的索引记录。
+
+
+
+哪些场景才能使用Combiner呢？
+Combiner的输出是Reducer的输入，Combiner绝不能改变最终的计算结果。所以从我的想法来看，Combiner只应该用于那种Reduce的输入key/value
+与输出key/value类型完全一致，且不影响最终结果的场景。比如累加，最大值等。Combiner的使用一定得慎重，如果用好，它对job执行效率有帮助，
+反之会影响reduce的最终结果。 Combiner的输出是Reducer的
+
+Merge的作用是什么？
+最终磁盘中会至少有一个这样的溢写文件存在(如果map的输出结果很少，当map执行完成时，只会产生一个溢写文件)，因为最终的文件只有一个，所以需要将这些溢写文件归并到一起，这个过程就叫做Merge
+
+每个reduce task不断的通过什么协议从JobTracker那里获取map task是否完成的信息？
+每个reduce task不断地通过RPC从JobTracker那里获取map task是否完成的信息
+
+
+reduce中Copy过程采用是什么协议？
+Copy过程，简单地拉取数据。Reduce进程启动一些数据copy线程(Fetcher)，通过HTTP方式请求map task所在的TaskTracker获取map task的输出文件。
+
+
+reduce中merge过程有几种方式？
+merge有三种形式：1)内存到内存  2)内存到磁盘  3)磁盘到磁盘。默认情况下第一种形式不启用，让人比较困惑，是吧。当内存中的数据量到达一定阈值，就启动内存到磁盘的merge。与map 端类似，这也是溢写的过程，这个过程中如果你设置有Combiner，也是会启用的，然后在磁盘中生成了众多的溢写文件。第二种merge方式一直在运行，直到没有map端的数据时才结束，然后启动第三种磁盘到磁盘的merge方式生成最终的那个文件。
+  
+}
+
+Combiner的适用场景：
+    由于Combiner的输出是Reducer的输入，Combiner绝不能改变最终的计算结果。故大多数情况下，
+combiner适用于输入输出的key/value类型完全一致，且不影响最终结果的场景（比如累加、最大值等……）。Combiner的使用一定得慎重，
+如果用好，它对job执行效率有帮助，反之会影响reduce的最终结果。  
+ 
+ 
+  
+2.MapReduce的工作原理或者工作机制
+ mapreduce，利用了分而治之的思想，Map（映射）和 Reduce（归约），分布式多处理然后进行汇总的思想，
+比如：清点扑克牌把里面的花色都分开，一个人清点那么可能耗时4分钟，如果利用mapreduce的思想，把扑克牌分成4份，
+每个人对自己的那一份进行清点，然后4个人都清点完成之后把各自的相同花色放一起进行汇总，那么这样可能只会耗时1分钟。
+这就是mapreduce的思想,其中每个人就相当于一个map，汇总就相当于是reduce，最开始的分牌就是patition分区（如果不均匀
+分配就相当于是数据倾斜），从map到reduce的过程就是shuffle。
+
+MapReduce的执行步骤(执行流程)：(https://www.cnblogs.com/ahu-lichang/p/6645074.html)
+1、Map任务处理
+　　1.1 读取HDFS中的文件。每一行解析成一个<k,v>。每一个键值对调用一次map函数。                <0,hello you>   <10,hello me>                    
+　　1.2 覆盖map()，接收1.1产生的<k,v>，进行处理，转换为新的<k,v>输出。　　　　　　　　　　<hello,1> <you,1> <hello,1> <me,1>
+　　1.3 对1.2输出的<k,v>进行分区。默认分为一个区。详见《Partitioner》
+　　1.4 对不同分区中的数据进行排序（按照k）、分组。分组指的是相同key的value放到一个集合中。　排序后：<hello,1> <hello,1> <me,1> <you,1>  分组后：<hello,{1,1}><me,{1}><you,{1}>
+　　1.5 （可选）对分组后的数据进行归约。详见《Combiner》
+
+2、Reduce任务处理。
+　　2.1 多个map任务的输出，按照不同的分区，通过网络copy到不同的reduce节点上。（shuffle）详见《shuffle过程分析》
+　　2.2 对多个map的输出进行合并、排序。覆盖reduce函数，接收的是分组后的数据，实现自己的业务逻辑，　<hello,2> <me,1> <you,1>
+　　　　处理后，产生新的<k,v>输出。
+　　2.3 对reduce输出的<k,v>写到HDFS中。
+ 
+3.MapReduce实现二次排序的原理(参考:https://www.cnblogs.com/codeOfLife/p/5568786.html):
+请简述Hadoop是如何实现二次排序的？
+先按照第一字段排序，然后再对第一字段相同的按照第二字段排序
+1).自定义 key
+   所有自定义的key应该实现接口WritableComparable，因为它是可序列化的并且可比较的
+2).自定义分区器
+   自定义分区函数类，是key的第一次比较，完成对所有key的排序。
+3).自定义比较器(即Key的比较类)
+ 这是Key的第二次比较，对所有的Key进行排序，即同时完成自定义key中的第一个和第二字段排序。该类是一个比较器，可以通过两种方式实现。
+  2.1).继承WritableComparator
+       必须有一个构造函数，并且重载以下方法
+  2.2).实现接口 RawComparator
+       在Job中，可以通过setSortComparatorClass()方法来设置Key的比较类
+4).定义分组器(分组类)
+   在Reduce阶段，构造一个与 Key 相对应的 Value 迭代器的时候，只要第一个key相同就属于同一个组，放在一个Value迭代器。定义这个比较器，可以有两种方式。
+ 4.1).继承 WritableComparator。(必须有一个构造函数，并且重载以下方法)
+ 4.2).实现接口 RawComparator。(在 Job 中，可以通过 setGroupingComparatorClass()方法来设置分组类)
+ 
+ 
+
+ 
+4.Hadoop为什么不适合处理小文件而适合处理大文件呢?
+1.由于Hdfs上的文件信息是存储在NN中的,对于每一个文件、目录或者是block块都是以object存储在NN的内存中的,
+  如果有很多小文件,它们都占用了内存,导致NN的内存可能会撑爆,而每次map任务会去NN中寻址小文件,小文件数量
+  一多势必会造成寻址时间增加,造成性能下降。
+  
+2.大量的小文件,DN向NN节点汇报效率势必降低,这样一来对集群的稳定性造成影响。
+ 
+5. 使用 MapReduce 来实现下面实例
+--现在有 10 个文件夹,每个文件夹都有 1000000 个 url.现在让你找出top1000000url？(可能存在重
+复数据)
+方法一.
+a).Job1:直接使用FileSystem读取10个文件夹作为map的输入,url作为key,reduce计算url的sum总数。
+b).Job2:map端用url的sum作为key,url为value作二次排序,reduce task中取Top1000000。
+方法二.
+创建Hive表,挂分区channel,每个文件夹作为一个分区,共10个分区,使用sql语句执行即可:
+select x.url,x.c from(select url,count(1) as c from A where channel ='' group by url) x order by x.c desc limit 1000000;
+
+
+6.什么叫hadoop(mapreduce简称MR)数据本地性?
+  数据本地性是指优先将任务调度到数据所在的节点上，这样可避免跨网络读取数据，从而提高任务运行效率。
+数据本地性分为节点本地性（node locality）和机架本地性（rack locality）两种。
+提高数据本性的方法有：delay scheduling、增加数据副本数等
+
+7.mapreduce '找共同朋友' (简单了解下,被问过一次)
+http://blog.itpub.net/29754888/viewspace-1445561/
+
+
+8.网上常见hadoop面试题(https://www.cnblogs.com/1130136248wlxk/articles/5519328.html)
+                       https://baijiahao.baidu.com/s?id=1570874781568302
+
+9.Hadoop调度器有哪几种，说明你知道的
+Fairschedular: 公平调度，所有job具有相同的资源。
+Fifoschedular:FIFO调度器,默认，先进先出原则。
+Capacityschedular：计算能力调度器，选择占用资源最小、优先级高的先执行。
+
+10.简单叙述mapreduce中combiner，partition的作用.
+combiner:实现的功能跟reduce差不多，接受map的值，经过计算后给reduce，他的key，value类型跟reduce完全一样，
+         当reduce业务复杂时可以用，不过他貌似是操作本机的数据
+Partition：将输出的结果分别保存在不同的文件中。
+
+
+11.Hadoop为什么不适合处理小文件而适合处理大文件呢?
+1).由于Hdfs上的文件信息是存储在NameNode(简称)中的,对于每一个文件、目录或者是block块都是以对象
+  存储在NN的内存中的,如果有很多小文件,它们都占用了内存,导致NN的内存可能会撑爆,
+   而每次map任务会去NN中寻址小文件,小文件数量一多势必会造成寻址时间增加,造成性能下降
+2).大量的小文件,DN向NN节点汇报效率势必降低,这样一来对集群的稳定性造成影响。
+   
+	
+
+公平调度器、计算能力调度器、FIFO调度器;
+
+
+MapReduce的Shuffle过程?
+1) map 端的shuffle 过程
+写入磁盘
+map 端会先将输出写入到内存缓冲区，当内存缓冲区到达指定的阈值时，一个后台线程就开始将缓冲区的内容spill 到磁盘。
+
+分区&排序
+在写入磁盘之前，线程首先根据数据最终要到达的reducer 将数据划分为相应的分区。在每个分区中，后台线程按键进行内存中排序。（分区的目的是将数据划分到不同的Reducer 上去，以期望达到负载均衡）
+
+合并阶段
+每个map 任务可能产生多个spill 文件，在任务完成之前，spill 文件会被合并为一个已分区已排序的输出文件。
+
+2) reduce 端的shuffle 过程
+复制阶段
+每个reduce 任务需要若干个map 任务的输出作为输入，每个map 任务的完成时间可能不同，因此在每个任务完成时，reduce 任务就开始复制其输出。
+
+这就是reduce 任务的复制阶段。reduce 任务有少量的复制线程，因此能够并行取得map 输出。
+
+合并阶段
+复制完所有map 输出后，reduce 任务进入合并阶段。这个阶段将合并map 输出，并维持其顺序排序。最后将合并结果数据直接输入reduce 函数。
+参考:https://blog.csdn.net/qq_24871519/article/details/87960317
+
+
+MapReduce的执行流程(底层原理)---分片，分区，合并，归并>>shuffle过程
+
+1、Map任务处理
+
+　　1.1 读取HDFS中的文件。每一行解析成一个<k,v>。每一个键值对调用一次map函数。                <0,hello you>   <10,hello me>                    
+
+　　1.2 覆盖map()，接收1.1产生的<k,v>，进行处理，转换为新的<k,v>输出。　　　　　　　　　　<hello,1> <you,1> <hello,1> <me,1>
+
+　　1.3 对1.2输出的<k,v>进行分区。默认分为一个区。详见《Partitioner》
+
+　　1.4 对不同分区中的数据进行排序（按照k）、分组。分组指的是相同key的value放到一个集合中。　排序后：<hello,1> <hello,1> <me,1> <you,1>  分组后：<hello,{1,1}><me,{1}><you,{1}>
+
+　　1.5 （可选）对分组后的数据进行归约。详见《Combiner》
+
+2、Reduce任务处理
+
+　　2.1 多个map任务的输出，按照不同的分区，通过网络copy到不同的reduce节点上。（shuffle）详见《shuffle过程分析》
+
+　　2.2 对多个map的输出进行合并、排序。覆盖reduce函数，接收的是分组后的数据，实现自己的业务逻辑，　<hello,2> <me,1> <you,1>
+
+　　　　处理后，产生新的<k,v>输出。
+
+　　2.3 对reduce输出的<k,v>写到HDFS中。

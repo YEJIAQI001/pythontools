@@ -1,0 +1,539 @@
+spark面试题总结:
+参考:
+https://blog.csdn.net/Lwj879525930/article/details/82559596?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.nonecase&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.nonecase
+1.sparkstreaming消费kafka数据，如果发生消息积压，如何处理？
+(参考:https://blog.csdn.net/qq_35078688/article/details/86078263)
+
+2.kafka如何保证数据不被重复消费并且不丢失数据  
+1).数据来源(kafka生产数据):生产者数据不丢失
+      同步模式：手动设置为request.required.acks=-1保证produce写入所有副本才算生产者发送数据成功
+      异步模式，不限制阻塞超时时间。就是一满生产者就阻塞
+2)消费者消费:消费者sparkstreaming处理过程:使用spark streaming直接API(Direct API),且借助zookeeper手动
+ 自己维护kafka offset,记录每次消费topic的offset
+ 同时开启sparkstreaming的checkpoint机制,利用SparkStreaming维护血源的依赖机制恢复找到之前消费的位置
+ 保证数据不丢失和不重复消费
+3)数据去路(数据输出)
+1).幂等操作，重复消费不会产生问题即count(distinct 字段名称)、avg(字段名称)、max(字段名称)此类操作,非sum类操作
+2).事务性操作,对于非幂等性如sum,count(字段)等与重复相关的操作kafka新版本中提供了支持下游消费者实现事务的特性,
+   需要下游消费者在输出数据到数据库如hbase、redis、mysql中的时候自己实现事务保证数据不重复。
+
+3.yarn-cluster提交流程:
+执行流程
+1).客户机提交Application应用程序，发送请求到ResourceManager请求启动ApplicationMaster。
+2).ResourceManager收到请求后随机在一台NodeManager上启动ApplicationMaster（相当于Driver端）。
+3).ApplicationMaster收到请求后启动并发送请求到ResourceManager，请求一批container
+   用于启动Executor。
+4).ResourceManager收到请求后返回一批NameNode节点给ApplicationMaster。
+5).ApplicationMaster收到请求后连接NameNode,发送请求到NameNode并启动Executor。
+6).Executor反向注册到ApplicationMaster所在的节点的Driver。Driver发送task到Executor去执行。 
+
+spark作业从spark-submit提交的整个流程?源码层面
+1).client submit作业，通过反射invoke执行用户代码main函数。
+2).submit作业后，开始启动CoarseGrainedExecutorBackend和初始化SparkContext。
+3).SparkContext初始化包括初始化监控页面SparkUI、执行环境SparkEnv、安全管理器SecurityManager、stage划分及调度器DAGScheduler、task作业调度器TaskSchedulerImpl和与Executor通信的调度端CoarseGrainedSchedulerBackend。
+4).DAGScheduler将作业划分后，依次提交stage对应的taskSet给TaskSchedulerImpl。
+5).TaskSchedulerImpl会submit taskset给driver端的CoarseGrainedSchedulerBackend后端。
+6).CoarseGrainedSchedulerBackend会一个一个的LaunchTask
+7).在远端的CoarseGrainedExecutorBackend接收到task提交event后，会调用Executor执行task
+8).最终task是由TaskRunner的run方法内运行。
+
+4.yarn-client与yarn-cluster提交模式的区别?
+1).Yarn-client模式适用于测试，因为Driver运行在本地，Driver会与yarn集群中的Executor进行
+   大量的通信，会造成客户机网卡流量的大量增加.
+2).Yarn-Cluster主要用于生产环境中，因为Driver运行在Yarn集群中某一台nodeManager中，
+  每次提交任务的Driver所在的机器都是随机的，不会产生某一台机器网卡流量激增的现象，
+  缺点是任务提交后不能看到日志。只能通过yarn查看日志。
+ 
+5.Spark Shuffle和MapReduce Shuffle的区别?
+1.从整体功能上看，两者并没有大的差别。
+都是将 mapper（Spark 里是 ShuffleMapTask）的输出进行 partition，不同的 partition 送到不同的 
+reducer（Spark 里 reducer 可能是下一个 stage 里的 ShuffleMapTask，也可能是 ResultTask）。
+Reducer 以内存作缓冲区，边 shuffle 边 aggregate 数据，等到数据 aggregate 好以后进行 
+reduce() （Spark 里可能是后续的一系列操作）。
+2.从流程上看，两者差别不小。
+MapReduce是sort-based，进入combine()和reduce()的records必须先sort。这样的好处在于combine/reduce()
+可以处理大规模的数据，因为其输入数据可以通过外排得到（mapper对每段数据先做排序，reducer 的 shuffle 
+对排好序的每段数据做归并）。
+
+以前Spark默认选择的是hash-based shuffle，通常使用HashMap来对shuffle来的数据进行aggregate，
+不会对数据进行提前排序。如果用户需要经过排序的数据，那么需要自己调用类似sortByKey()的操作；
+如果你是Spark 1.1的用户，可以将spark.shuffle.manager设置为sort，则会对数据进行排序。
+在Spark 1.2中，sort-base shuffle将作为默认的Shuffle实现。
+spark1.5之后又出现了乌斯shuffle,对sort shuffle进一步优化。
+
+3.从流程实现角度来看，两者有不少差别。
+MapReduce将处理流程划分出明显的几个阶段：map()、shuffle、reduce()等。
+每个阶段各司其职，可以按照过程式的编程思想来逐一实现每个阶段的功能。
+Spark中，没有这样功能明确的阶段，只有不同的stage和一系列的transformation()。
+(参考:https://blog.csdn.net/qq_37332702/article/details/88950160)
+https://blog.csdn.net/HaixWang/article/details/79407193
+  
+7.MapReduce的执行流程和Shuffle流程?
+https://blog.csdn.net/u013234372/article/details/39779711
+MapReduce的Shuffle过程?
+1) map 端的shuffle 过程
+a.spill
+map 端会先将输出写入到内存缓冲区,当内存缓冲区到达指定的阈值时，一个后台线程就开始将缓冲区的内容
+内容spill 到磁盘。
+
+b.分区&排序
+在spill到磁盘之前，线程首先根据数据最终要到达的reduce 将数据划分为相应的分区。在每个分区中，
+后台线程按键进行排序。
+
+c.合并阶段
+每个map 任务可能产生多个spill 文件，在任务完成之前，spill 文件会被合并为一个已分区已排序的输出文件。
+
+2) reduce 端的shuffle 过程
+d.复制阶段
+每个reduce 任务需要若干个map 任务的输出作为输入，每个map 任务的完成时间可能不同，
+因此在每个任务完成时，reduce任务就开始复制其输出。这就是reduce 任务的复制阶段。
+
+e.合并阶段
+复制完所有map 输出后，reduce 任务进入合并阶段。这个阶段将合并map 输出，并维持其顺序排序。
+最后将合并结果数据直接输入reduce 函数。
+参考:https://blog.csdn.net/qq_24871519/article/details/87960317
+  
+8.Spark Shuffle的种类可分为几种?分别具有什么含义?
+大致可分为以下两种:
+-1).Hash Shuffle
+a.要求key不能为数组;
+b.Hash Shuffle不需要排序,理论上节省了MapReduce中进行Shuffle需要排序的时间浪费
+注意:Shuffle操作绝大多数情况下都要同通过网络,如果Mapper和Reducer在同一台机器上时,此时秩序读取本地磁盘即可。Spark中的Executor是线程池中的线程
+复用,它可能运行上一个Stage的Task,也可能运行下一个Stage的Task。
+Hash Shuffle的两大弊端:
+(1).Shuffle前会产生海量的小文件在磁盘上,此时会产生大量耗时低效的IO操作。
+(2).内存可能不够用,由于内存中需要保存海量的文件句柄和临时缓存信息,如果数据处理规模较大的话,内存可能承受不住,造成OOM异常等问题。
+怎样解决同时打开过多文件导致Writer Handler内存使用过大以及产生过度文件导致大量的随机读写带来的效率极为低下的磁盘IO操作?
+Spark提出了Consalidate机制将小文件进行合并以使Shuffle产生的文件大幅减少,极大减少OOM可能
+Consalidate机制：把同一个Task的输出变成一个文件进行合并，根据CPU的个数来决定具体产生多少文件，对于运行在同一个core的Shuffle Map Task
+，第一个Shuffle Map Task会创建一个，之后的就会将数据追加到这个文件上而不是新建一个文件。
+
+
+-2).Sorted Shuffle
+Sorted Shuffle是如何解决大量小文件？ 
+每个ShuffleMapTask不会为每个Reduce单独生成一个文件，它会将结果生成到一个文件里，同时会生成一个
+索引文件，那每个reduce可以根据这个index索引，取得它所要的文件数据，
+这样就避免产生大量的文件，也就不需要大量文件写的句柄，节省了内存。
+
+磁盘上的文件也变小了，这个时候不是随机读取，而是顺序Disk IO带来了低延迟，节省了内存，
+另外可以减少GC的分享的频率，而减少具体的文件数量避免同时写多个文件时给系统带来的压力。 
+对于ShuffleMapTask具体的归并排序的方式也就是extend sort，sort之后其实会产生两个文件，这两个文件，一个是索引文件，另一个是具体文件的内容，我们在Reducer端读数据的时候其实，
+首先访问Index文件，也就是具体工作的时候BlockManager，首选会帮我们访问Index，Index去定位具体文件的内容。Reducer本身因为它是通过index文件获取它需要处理的数据，
+这样就可以避免产生大量句柄，节省内存。上游的数据ShuffleMapTask是在一个文件中的。 
+怎么获取文件内容呢？通过索引去获取，从工作的角度上来讲，只有一个文件句柄，文件句柄和文件数目大大的减少。
+  
+9.spark的checkpoint实现过程?
+   RDD 需要经过 [ Initialized --> marked for checkpointing --> 
+   checkpointing in progress --> checkpointed ] 这几个阶段才能被 checkpoint。
+1).Initialized： 首先 driver program 需要使用 rdd.checkpoint() 去设定哪些 rdd 需要
+ checkpoint，设定后，该 rdd 就接受 RDDCheckpointData 管理。用户还要设定 checkpoint 
+ 的存储路径，一般在 HDFS 上。
+2).marked for checkpointing：初始化后，RDDCheckpointData 会将 rdd 标记为 
+MarkedForCheckpoint。
+3).checkpointing in progress：每个 job 运行结束后会调用 finalRdd.doCheckpoint()，
+finalRdd 会顺着 computing chain 回溯扫描，碰到要 checkpoint 的 RDD 就将其标记为
+ CheckpointingInProgress，然后将写磁盘（比如写 HDFS）需要的配置文件（
+ 如 core-site.xml 等）broadcast 到其他 worker 节点上的 blockManager。完成以后，
+ 启动一个 job 来完成 checkpoint（使用 rdd.context.runJob(rdd, CheckpointRDD.
+ writeToFile(path.toString, broadcastedConf))）。
+4).checkpointed：job 完成 checkpoint 后，将该 rdd 的 dependency 全部清掉，并设定该
+rdd 状态为 checkpointed。然后，为该 rdd 强加一个依赖，设置该 rdd 的 parent rdd 为
+CheckpointRDD，该 CheckpointRDD 负责以后读取在文件系统上的 checkpoint 文件，生成该
+rdd 的 partition。
+  
+10.spark的背压机制实现?
+Spark Streaming 的背压
+Spark Streaming 跟 kafka 结合是存在背压机制的，目标是根据当前 job 的处理情况
+来调节后续批次获取 kafka 消息的条数。为了达到这个目的，Spark Streaming 在原有的
+架构上加入了一个 RateController，利用的算法是 PID，需要的反馈数据是任务处理的
+结束时间、调度时间、处理时间、消息条数，这些数据是通过 SparkListener 体系获得，
+然后通过 PIDRateEsimator 的 compute 计算得到一个速率，进而可以计算得到一个 offset，
+然后跟限速设置最大消费条数比较得到一个最终要消费的消息最大 offset。
+ 
+Flink 的背压
+与 Spark Streaming 的背压不同的是，Flink 背压是 jobmanager 针对每一个 task 
+每 50ms 触发 100 次 Thread.getStackTrace() 调用，求出阻塞的占比。
+
+11.Spark内存溢出怎么解决?
+内存溢出无非两点：
+1). Driver 内存不够
+2). Executor 内存不够
+
+
+Driver 内存不够无非两点：
+a. 读取数据太大 
+Driver 中需要读取大量数据
+造成 Driver 内存溢出
+解决思路是增加 Driver 内存，具体做法为设置参数 --driver-memory MEM 调大 
+b. 数据回传
+大量数据回传 Driver，造成内存溢出
+解决思路是分区输出，具体做法如: foreach替代collect
+
+Executor 内存不够无非两点：
+1). map 类算子操作产生大量数据，包括 map、flatMap、filter、mapPartitions 等
+2). shuffle 后产生数据倾斜
+a.有个通用的解决办法就是增加 Executor 内存
+b.map 过程产生大量对象造成 Executor 内存溢出
+  解决思路是减少每个 task 的大小，从而减少每个 task 的输出；
+  具体做法是在 会产生大量对象的 map 操作前 添加 repartition(重新分区) 方法，分区成更小的块传入 map。
+c.数据倾斜--解决数据倾斜问题(自定义分区)
+ 
+12.spark数据倾斜解决方案?
+经过分析，倾斜的数据主要有以下三种情况: 
+a、null（空值）或是一些无意义的信息()之类的,大多是这个原因引起。
+b、无效数据，大量重复的测试数据或是对结果影响不大的有效数据。
+c、有效数据，业务导致的正常数据分布。
+第a，b种情况，直接对数据进行过滤即可（因为该数据对当前业务不会产生影响）。
+第3种情况则需要进行一些特殊操作，常见的有以下几种做法 
+(1) 隔离执行，将异常的key过滤出来单独处理，最后与正常数据的处理结果进行union操作。
+(2) 对key先添加随机值，进行操作后，去掉随机值，再进行一次操作。
+(3) 使用reduceByKey 代替 groupByKey(reduceByKey用于对每个key对应的多个value进行merge操作，最重要的是它能够在本地先进行merge操作，并且merge操作可以通过函数自定义.)
+(4) 使用map join。
+(5) 自定义分区将数据打散,使数据分布均匀。
+
+13.spark中cache和persist的区别：
+cache：缓存数据，默认是缓存在内存中，其本质还是调用persist
+persist:缓存数据，有丰富的数据缓存策略。数据可以保存在内存也可以保存在磁盘中，
+使用的时候指定对应的缓存级别就可以了。
+
+14.driver的功能是什么：
+答：1.一个spark作业运行时包括一个driver进程，是spark程序的入口;
+    2.功能：负责向集群申请资源，向master注册信息，负责了作业的调度，负责了作业
+      的解析，生成stage并调度task到executor上，包括DAGScheduler，TaskScheduler。
+
+15.spark中如何划分stage：
+  Spark任务会根据RDD之间的依赖关系，形成一个DAG有向无环图，DAG会提交给DAGScheduler，
+DAGScheduler会把DAG划分相互依赖的多个stage，划分依据就是宽窄依赖，遇到宽依赖就划分
+stage，每个stage包含一个或多个task，然后将这些task以taskSet的形式提交给TaskScheduler
+运行，stage是由一组并行的task组成。
+1).spark程序中可以因为不同的action触发众多的job，一个程序中可以有很多的job，每一个
+  job是由一个或者多个stage构成的，后面的stage依赖于前面的stage，也就是说只有前面依赖
+  的stage计算完毕后，后面的stage才会运行；
+2).stage 的划分标准就是宽依赖：何时产生宽依赖就会产生一个新的stage，例如reduceByKey,
+  groupByKey，join的算子，会导致宽依赖的产生；
+3).切割规则：从后往前，遇到宽依赖就切割stage;
+
+16.有向无环图：
+答：DAG，有向无环图，简单的来说，就是一个由顶点和有方向性的边构成的图中，从任意一个
+顶点出发，没有任意一条路径会将其带回到出发点的顶点位置，为每个spark job计算具有
+依赖关系的多个stage任务阶段，通常根据shuffle来划分stage，如reduceByKey,groupByKey
+等涉及到shuffle的transformation就会产生新的stage ，然后将每个stage划分为具体的一组
+任务，以TaskSets的形式提交给底层的任务调度模块来执行，其中不同stage之前的RDD为
+宽依赖关系，TaskScheduler任务调度模块负责具体启动任务，监控和汇报任务运行情况。 
+  
+17.kafka整合sparkStreaming有几种方式?
+DriectStream和Receiver两种方式。
+
+18.spark有哪些组件？ 
+答：主要有如下组件：
+1）master：管理集群和节点，不参与计算。 
+2）worker：计算节点，进程本身不参与计算，和master汇报。 
+3）Driver：运行程序的main方法，创建spark context对象。 
+4）spark context：控制整个application的生命周期，包括dagsheduler和task scheduler
+  等组件。 
+5）client：用户提交程序的入口。
+
+19.spark工作机制？ 
+答：用户在client端提交作业后，会由Driver运行main方法并创建spark context上下文。 
+执行add算子，形成dag图输入dagscheduler，按照add之间的依赖关系划分stage输入task 
+scheduler。 task scheduler会将stage划分为task set分发到各个节点的executor中执行。
+  
+20.Spark为什么比mapreduce快？
+1）基于内存计算，减少低效的磁盘交互；
+2）高效的调度算法，基于DAG有向无环图,DAG有向无环图在此过程中减少了shuffle以及
+   落地磁盘的次数；
+3) 容错机制Linage，精华部分就是DAG和Lingae
+4) spark是粗粒度资源申请,MapReduce是细粒度资源申请
+参考:https://blog.csdn.net/wyqwilliam/article/details/84680066?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3
+
+21.Spark共享变量(广播变量与累加变量)
+1.广播变量(broadcast variables):只读变量,不允许被修改,在Driver中执行
+功能:减少driver到executor的数据量传输,可以通过广播变量实现map join
+注意:1.广播变量一经广播,变量不允许被修改(例如将变量广播出去SparkContext.broadcast("", map))
+2.广播变量在executor中是存储在storage memory部分,如果task在运行的过程中发现Storage memory中不存在
+对应的值,会重新从driver中获取
+3.如果广播变量不用了,记住删除清空操作。(sc.unpersist(true))
+2.累加变量:只写变量,在task(executor)中只允许被修改,不允许读取操作
+注意:累加器是在executor中进行数据累加操作,在driver中进行数据读取操作(executor中不允许数据读取操作)
+
+22.窄依赖和宽依赖介绍
+--1.依赖
+--a.窄依赖
+子RDD的每个分区的数据来自于常数个父RDD分区;父RDD的每个分区的数据到子RDD的时候是在一个分区中进行处理的
+常用方法:map、flatMap、filter、union、join(要求两个父RDD具有相同的partitioner:类型一样同时两个父RDD的分区数目和子RDD
+的分区数目是一致的)等
+--b.宽依赖
+子RDD的每个分区的数据来自所有的父RDD的分区,父RDD的每个分区的数据都有可能分配到所有子RDD分区中
+常用方法:groupByKey、reduceByKey、join(分区数发生改变)、repartition等
+宽依赖和窄依赖的区别:是否发生shuffle,也是stage的划分依据。也就是说上一个RDD的一个分区的数据如果到下游单个分区就代表是窄依赖,
+
+上游一个RDD分区的数据到下游多个分区的RDD就是宽依赖。
+
+23.简述RDD、DataFrame、Dataset三者的区别?
+a)RDD:(1).编译时类型安全,编译时就能准确检查类型是否错误。(2).它是面向对象编程的,直接通过类名点的方式操作数据。
+但是缺点是(1).无论集群间通信或IO操作都需对对象的数据和结构都要进行序列化和反序列化由此带来比较大的性能开销
+(2).GC的性能开销:频繁的创建和销毁对象,会增加GC的开销。
+b)DataFrame:(1).将RDD存储的对象结构化存储在schema中,Spark通过读取schema就能获取所需数据,减少了结构化数据在通信和IO时的序列化和反序列化。
+(2).它还包含堆外内存(不受JVM管理)也就不存在GC问题,Spark以二进制形式序列化数据进堆外内存,提升执行效率。
+c)Dataset:Dataset可以认为是DataFrame的一个特例,主要区别是Dataset每一条记录(record)存储的是一个强类型值而不是一个Row。
+(1).DataSet可以在编译时检查类型(2).是面向对象的编程接口(3).DataFrame是面向Spark SQL的接口且DataFrame和DataSet可以相互转化。
+
+ 
+
+24.怎样监控Spark Streaming流处理程序运行过程中的状态,如有异常应该怎样提醒?
+常见分布式企业级监控:
+1.Ganglia:无界面配置部署,且没有电话、短信、微信和邮件等通知功能。
+2.Nagios:无界面配置部署,使用相对比较少。
+3.Zabbix:有界面的配置部署,可以实现电话、短信、微信和邮件等通知功能,企业中用的较多。
+4.Zabbix特点:
+a.支持多语言(包括中文)
+b.免费开源
+c.主动发现服务器与网络设备
+d.分布式监视以及web集中管理功能
+e.可无agent监视
+f.用户安全认证和柔软的授权方式
+g.通过web界面设置或查看监视结果
+h.email等通知功能，并且兼容各种通知(电话，短信，微信，邮件等等)
+
+25.重点类讲解:
+(a).DAGScheduler:负责将Job拆分成不同阶段的具有依赖关系的多批任务		负责任务的逻辑调度,根据ShuffleDependency划分stage的
+(b).TaskScheduler:负责执行每个具体任务(Task)的实际物理调度			可以确保有依赖关系的数据能够按照正确的顺序得到处理和运算
+(3).Stage划分算法
+1..Stage划分原因或前提:Spark的算子都是链式结构构建的,针对链式计算,Spark的策略是先划分Stage,然后进行计算。
+  Stage划分的依据:是否发生重组,即一个分区的数据是否到下一个RDD的多个分区,也是shuffle的划分依据。
+2.底层算法思想:
+(1).一个Job可以由一个或多个Stage构成,Stage的划分依据是宽依赖,而产生宽依赖的算子是:reduceByKey,groupByKey等等。
+(2).根据依赖关系,从前往后依次顺序执行多个Stage。
+(3).Stage的执行是Lazy级别的:所有的Stage会形成一个DAG,由于RDD的Lazy特性,导致Stage也是Lazy级别的,只有遇到Action才会真正发生
+作业的执行,Action之前,只是将要进行计算的路径记录下来,并没有真正的执行。
+
+26.Spark调度管理(单个任务)
+a.Spark调度相关概念
+Task(任务):单个分区数据及以上的最小处理流程单元
+TaskSet(任务集):由一组关联的,但相互之间没有宽依赖关系的任务所组成的任务集
+Satge(调度阶段):一个任务集对应的调度阶段
+Job(作业):由一个RDD的Action生成的一个或多个Satge所组成的一次计算作业
+Application(应用程序):Spark应用程序,由一个或多个作业组成
+
+27.Spark2.x的新特性
+a.Spark Core/SQL:在内存和CPU使用方面进一步优化Spark引擎性能。支持SQL 2003标准,支持子查询和对常用的SQL操作和DataFrame有大幅性能提升
+b.SparkSession:2.x引入了SparkSession的概念,为用户提供了一个统一(比如统一了SQLContext和HiveContext)的切入点来使用Spark的各项功能.
+c.统一DataFrames和Datasets的API:在Spark2.x中将DataFrame当作是一种特殊的Dataset,即DataFrame=Dataset[Row],把两者统一为Datasets。
+d.Structured Streaming:它是基于Spark SQL(DataFrame/Dataset)构建的High-Level的API,使其充分收益Spark SQL的易用性和性能提升。
+e.其他特性:Mllib的计算使用DataFrame-based API代替之前版本的基于RDD的计算逻辑,还提供更多的R语言算法
+
+28.Spark算在中reduceByKey和groupByKey的区别
+reduceByKey:适合使用在大数据集上(Spark知道它可以在每个分区移动数据前将输出数据与一个共用的key结合		局部聚合通过
+reduceByKey中的lambda函数实现),然后lamdba函数在把每个分区上被再次调用来的值reduce成最终结果		全局聚合
+本质上来讲，reduceByKey函数只作用于包含key-value对的RDDS上，它是transformation类型的算子，这也就意味着它是懒加载的
+(就是说不调用Action的方法,是不会去计算的),在使用时,我们需要传递一个相关的函数作为参数，这个函数将会被应用到源RDD上
+并且创建一个新的RDD作为返回结果，这个算子作为Data Shuffling在分区的时候被广泛使用。
+groupByKey:所有键值对都会从每个分区进行移动		造成网络传输的浪费,为了确定将数据对移动到哪台机器(采用hash分区算法)
+当移动的数据量大于单台执行机器内存总量时Spark会把数据保存到磁盘上-->影响性能,		单个key键值对超过内存容量时会存在OOM异常。
+
+spark算子中reduceByKey和groupByKey的区别?
+reduceByKey是局部聚合,是在分区内会进行数据聚合操作;
+groupByKey是全局聚合,是移动所有分区的数据到一个分区上进行聚合,造成网络传输的浪费,影响性能;
+
+列举出Spark RDD中transformation类型的算子和action类型的算子分别有那些?
+RDD transformation:map、filter、flatMap、groupByKey、reduceByKey、sortByKey、join、union、cogroup等
+RDD action:reduce、collect、count、first、take、saveAsTextFile、countByKey、foreach等
+
+
+
+30.Spark的核心是什么即Spark整个生态系统的关键是什么?
+Spark的核心是DAG(有向无环图),在Spark中用于对RDD的关系进行建模,描述了RDD的依赖关系(lineage),且RDD的依赖关系使用Dependency维护。
+DAG的实现DAGScheduler
+当我们程序经过一系列的transformation操作时,Spark内核会在调用action操作即计算发生的时绘制一张计算路径的有向无环图即DAG,
+然后DAGScheduler会先对DAG进行计算,然后执行,根据对应的ShuffleMapStage和ResultStage将DAG划分为对应的任务集(TaskSet)也就是Stage,
+最后通过Spark内核中的TaskScheduler将Stage根据ShuffleMapTask和ResultTask分别划分为对应的任务提交到worker的Executor上进行计算。
+Spark计算的中间结果默认是保存在内存中的,Spark在划分Stage会充分考虑在分布式中的流水线操作(pipeline)来提高计算效率,该过程主要
+根据RDD的依赖关系(宽依赖ShuffleDependency和窄依赖NarrowDependency)进行划分。
+
+31.Spark优化中数据本地化发生在什么时期?
+数据本地化的原因:由于大数据集群要计算的数据是分布式的存储在各个节点上的,为了减少网络传输的开销和提高数据计算的效率和性能。
+Spark数据本地化:在计算时,数据本身已经在内存中或者利用已有缓存无需计算的方式获取数据。
+(a).数据本地化的级别:
+1)PPOCESS_LOCAL:指的是task要计算的数据在本进程(Executor)的内存中。也即代码和数据在同一个Executor中。
+2)NODE_LOCAL:分为1.task计算的数据在本节点所在的磁盘上和2.task所计算的数据在本节点其它Executor进程的内存中
+3)NO_PREF:task所计算的数据在关系型数据库中如mysql
+4)RACK_LOCAL:task所计算的数据在同一机架的不同节点的磁盘或Executor进程的内存中
+5)ANY:跨机架
+b).Spark数据本地化调优:
+1.提高数据本地化的级别
+一.可以增加每次发送task的等待时间(默认都是3s),将3s倍数调大,结合WEBUI(调节相关配置文件的参数)来调节
+参数为:spark.locality.wait、spark.locality.wait.process、spark.locality.wait.node、spark.locality.wait.rack
+注意:等待时间不能调大太多,可能会导致虽然每一个task的本地化级别是最高了,但整个Application的执行时间反而加长
+
+2.如何查看数据本地化级别?
+可以通过日志或者WEBUI进行查看。 
+  
+32.Spark的容错机制:Task数据恢复和重新运行机制即Lineage机制
+-1.Driver宕机:
+client:程序直接中断退出
+cluster:
+Spark on standalone/mesos:
+通过spark-submit的参数--supervise可以指定driver宕机的时候,在其他节点上重新恢复。
+Spark on yarn:
+自动恢复四次和MapReduce一样
+-2.executor宕机
+直接自动在worker或者NodeManager上重新启动一个executor重新执行任务
+-3.task执行失败
+自动进行恢复,最大失败次数是4次
+-4.如果后续rdd执行过程中,出现数据丢失,容错的方式为:RDD Lineage(生命线) ==>RDD的依赖
+Spark RDD提供的一种容错机制,当子RDD执行失败的时候,可以直接从父RDD进行恢复操作,如果父RDD的执行结果进行了缓存
+操作,子RDD直接从缓存位置获取结果数据;如果cache的不是全部数据的话,那么部分数据从缓存中读取,其他数据从父RDD的数据
+来源读取(存在父RDD的代码逻辑执行);如果子RDD失败的是单个分区,那么如果父RDD和子RDD的关系是窄依赖,只需要恢复
+父RDD的对应分区的数据即可,如果关系是宽依赖,需要将所有父RDD的数据都执行一遍。
+
+33.spark优化:
+参考:https://www.jianshu.com/p/67606a11415b
+a.代码层面调优:
+1).使用高性能序列化类库Kryo
+2).优化数据结构
+3).对多次使用的RDD进行持久化
+4).广播大变量
+5).使用高性能的算子,如使用reduceByKey替代groupByKey
+6).使用map-side预聚合的shuffle操作
+
+b.资源参数调优
+1).executor配置
+2).driver配置
+3).并行度
+4).网络超时
+5).数据本地化
+6).JVM/gc配置
+c.避免数据倾斜问题
+  
+34.Spark的工作原理:
+1).当Driver启动后会做一些初始化操作,并发送请求到master,告诉master有新的Spark应用程序要运行。
+2).master接收到Spark程序的应用申请之后会发送请求到worker进行资源的调度和分配
+3).work会启动多个executor,此时会向Driver进行反向注册,这样Driver可以知道哪些executor是为它进行服务的
+4).当diver上注册了一些Executor之后就可以正式开始执行我们的spark应用程序了,第一步创建初始RDD读取数据源,
+   然后进行一系列transformation或者action算子操作;
+5).触发action算子将转换后的结果集sink到存储介质中
+
+
+python版leetcode:https://www.jianshu.com/p/60b5241ca28e
+http://spu.dangdang.com/1597964054.html
+https://www.iteye.com/resource/weixin_37251044-11151955
+http://www.jztuan.net/product/view10306.html
+
+  
+  
+3.yarn-cluster提交流程:
+执行流程
+1).客户机提交Application应用程序，发送请求到ResourceManager请求启动ApplicationMaster。
+2).ResourceManager收到请求后随机在一台NodeManager上启动ApplicationMaster（相当于Driver端）。
+3).ApplicationMaster收到请求后启动并发送请求到ResourceManager，请求一批container
+   用于启动Executor。
+4).ResourceManager收到请求后返回一批NameNode节点给ApplicationMaster。
+5).ApplicationMaster收到请求后连接NameNode,发送请求到NameNode并启动Executor。
+6).Executor反向注册到ApplicationMaster所在的节点的Driver。Driver发送task到Executor去执行。 
+
+spark作业从spark-submit提交的整个流程?源码层面
+1).client submit作业，通过反射invoke执行用户代码main函数。
+2).submit作业后，开始启动CoarseGrainedExecutorBackend和初始化SparkContext。
+3).SparkContext初始化包括初始化监控页面SparkUI、执行环境SparkEnv、安全管理器SecurityManager、stage划分及调度器DAGScheduler、task作业调度器TaskSchedulerImpl和与Executor通信的调度端CoarseGrainedSchedulerBackend。
+4).DAGScheduler将作业划分后，依次提交stage对应的taskSet给TaskSchedulerImpl。
+5).TaskSchedulerImpl会submit taskset给driver端的CoarseGrainedSchedulerBackend后端。
+6).CoarseGrainedSchedulerBackend会一个一个的LaunchTask
+7).在远端的CoarseGrainedExecutorBackend接收到task提交event后，会调用Executor执行task
+8).最终task是由TaskRunner的run方法内运行。
+
+spark rdd的五大特性:
+1).RDD是有一个或者多个分区的
+2).每个分区都有一个计算函数
+3).依赖于其它RDD的列表 
+4).数据类型(Key-Value)的RDD分区器
+5).每个分区都有一个优先位置列表
+  
+rdd是有一个或者多个分区的
+每个分区都有一个计算函数 
+依赖于其它rdd的列表 
+数据类型(Key-Value)的RDD分区器
+
+rdd是有一个或者多个分区的 
+每个分区都有一个计算函数 
+每个分区都有一个优先位置列表
+rdd是相互依赖的 
+数据类型(Key-Value)的RDD分区器
+
+  
+缓存和checkpoint的区别?
+1).目的不同:缓存是为高效性,checkpoint(容错)是考虑容错性。
+2).缓存把 RDD 计算出来然后放在内存中，但是RDD 的依赖链也不能丢掉， 当某个 executor 宕了，
+   上面cache 的RDD就会丢掉， 就需要重新计算。
+   checkpoint 是把 RDD 保存在 HDFS中， 是多副本可靠存储，所以依赖链就可以丢掉了, 
+   是通过复制实现的高容错。
+
+Checkpoint工作原理(或者实现?)
+    在SparkContext中需要调用setCheckpointDir方法，设置一个容错的文件系统的目录，比如HDFS。
+然后对RDD调用checkpoint方法，之后在RDD所处的job运行结束之后，会启动一个单独的job来将checkpoint
+过的RDD数据写入之前设置的文件系统中。进行持久化操作。
+    那么此时，即使在后面使用RDD的时候，他的持久化数据不小心丢失了，但是还是可以从它的checkpoint
+文件中读取出该数据，而无需重新计算。
+参考: https://blog.csdn.net/anbang713/article/details/81623472
+
+spark状态管理?
+SparkStreaming 7*24 小时不间断的运行，有时需要管理一些状态，比如wordCount，每个batch的数据不是独立的而是
+需要累加的，这时就需要sparkStreaming来维护一些状态，目前有两种方案updateStateByKey&mapWithState，
+mapWithState是spark1.6新加入的保存状态的方案，官方声称有10倍性能提升。
+
+两种状态管理的区别?
+1).updateStateByKey底层是将preSateRDD和parentRDD进行co-group，然后对所有数据都将经过自定义的mapFun函数
+进行一次计算，即使当前batch只有一条数据也会进行这么复杂的计算，大大的降低了性能，并且计算时间会随着维护
+的状态的增加而增加。
+2)mapWithstate底层是创建了一个MapWithStateRDD，存的数据是MapWithStateRDDRecord对象，一个Partition对应一个
+MapWithStateRDDRecord对象，该对象记录了对应Partition所有的状态，每次只会对当前batch有的数据进行跟新，而不会
+像updateStateByKey一样对所有数据计算。
+
+
+ 
+sparkstreaming常见算子及窗口函数:
+参考: https://blog.csdn.net/Thomson617/article/details/87780167?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.channel_param
+sparkstreaming内存溢出排查思路:
+https://gourderwa.blog.csdn.net/article/details/93630820
+https://blog.csdn.net/qq_33160722/article/details/54092560?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param
+
+
+记一次java内存溢出的排查过程?如何找出导致内存溢出的对象
+参考:   https://blog.csdn.net/xishanxinyue/article/details/15336551
+
+导出dump信息后就可以通过jprofiler工具或者HeapAnalyzer做分析。这两个工具都很强大，网上有很多的使用指导。
+可以初步分析出到底是什么对象在占用内存，以及相应的引用链，到这一步在结合源代码在定位内存溢出问题就相对
+容易了。  
+
+OOM有两种情况:
+机器OOM: Top 查一下看哪个进程占用内存比较大,然后具体到该进程中去定位;
+应用程序OOM:即你的代码服务导致OOM,一般是代码中某个对象导致OOM,伴随着GC比较频繁,此时可以使用jvm检测工具jprofiler
+来分析内存使用情况,并导出dump信息,可通过dump信息并结合jprofiler工具分析定位大盘到底是什么对象只用比较大的内存。
+
+Linux下JVM内存溢出后排查分析:
+参考: https://blog.csdn.net/weisong530624687/article/details/80974123?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param
+
+https://blog.csdn.net/qq_43227570/article/details/84333747?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-5.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-5.channel_param
+
+运维角度:
+1).jps任务查看下具体哪个进程导致OOM
+2).找到这个进程下查看这个进程的内存使用情况
+3).用linux内存分析工具抓下内存分析信息即dump信息,
+4).将dump信息放到内存分析工具jprofiler里分析可以定位到具体哪个对象占用内存
+
+
+
+Hadoop如何处理非结构化数据?
+根据需求与hbase整合，hbase分布式数据库，列式存储。Hadoop利用mapreduce框架进行处理。
+非结构化数据存储在hbase中,通过sqoop同步hbase非结构化数据到hive;
+或者非结构化数据存储在redis中,然后将数据同步到hive。
+
+
+
+
+
+
+
+
+
+
+ 

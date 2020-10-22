@@ -1,0 +1,251 @@
+有哪些管理经验可以分享呢?
+1).作为这个小组的负责人，如何分配工作
+2).制定项目进度
+3).协调业务部门和小组之间
+
+如何让别人信服：
+（虽然咱们没怎么做过领导，但是你可以想一下你过往接触的领导和你接触的职场人士具有什么特质）
+一个是自己的技术要到位
+二个是自己统筹协调能力
+三个是知人善用
+四是当发生分歧如何处理
+
+hbase二级索引实现原理:(晚上找老王给答案)
+
+mysql binlog日志:
+binlog的格式也有三种：STATEMENT、ROW、MIXED 。
+STATMENT模式：基于SQL语句的复制(statement-based replication, SBR)，每一条会修改数据的sql语句会记录到binlog中。
+	优点：不需要记录每一条SQL语句与每行的数据变化，这样子binlog的日志也会比较少，减少了磁盘IO，提高性能。
+	缺点：在某些情况下会导致master-slave中的数据不一致(如sleep()函数， last_insert_id()，以及 user-defined functions(udf)等会出现问题)
+	基于行的复制(row-based replication, RBR)：不记录每一条SQL语句的上下文信息，仅需记录哪条数据被修改了，修改成了什么样子了。
+	优点：不会出现某些特定情况下的存储过程或function、或trigger的调用和触发无法被正确复制的问题。
+	缺点：会产生大量的日志，尤其是alter table的时候会让日志暴涨。
+	混合模式复制(mixed-based replication, MBR)：以上两种模式的混合使用，一般的复制使 用STATEMENT模式保存binlog，对于STATEMENT模式无法复制的操作使用ROW模式保存binlog， MySQL会根据执行的SQL语句选择日志保存方式。
+因为statement只有sql，没有数据，无法获 取原始的变更日志，所以一般建议为ROW模式)
+
+
+sqoop总结:
+1.sqoop如何进行增量抽取?三个参数
+–-check-column ACTION_TIME 
+–-incremental lastmodified 
+--last-value ${datenow} 
+参考: https://blog.csdn.net/linlinv3/article/details/48028521?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.nonecase&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.nonecase
+
+
+
+kylin总结:
+1.kylin工作原理:https://zhuanlan.zhihu.com/p/104466978
+Kylin的核心思想是预计算。
+
+理论基础是：以空间换时间。
+Apache Kylin 的工作原理就是对数据模型做 Cube 预计算，并利用计算的结 果加速查询，具体工作过程如下。 
+1）指定数据模型，定义维度和度量。 
+2）预计算 Cube，计算所有 Cuboid 并保存为物化视图。 
+3）执行查询时，读取 Cuboid，运算，产生查询结果。
+
+2.kylin的架构:
+1）REST Server
+REST Server是一套面向应用程序开发的入口点，旨在实现针对Kylin平台的应用开发工作。
+此类应用程序可以提供查询、获取结果、触发cube构建任务、获取元数据以及获取用户权限等等。
+另外可以通过Restful接口实现SQL查询。
+2）查询引擎（Query Engine）
+当cube准备就绪后，查询引擎就能够获取并解析用户查询。它随后会与系统中的其它组件进行交
+互，从而向用户返回对应的结果。 
+3）路由器（Routing）
+在最初设计时曾考虑过将Kylin不能执行的查询引导去Hive中继续执行，但在实践后发现Hive与
+Kylin的速度差异过大，导致用户无法对查询的速度有一致的期望，很可能大多数查询几秒内就
+返回结果了，而有些查询则要等几分钟到几十分钟，因此体验非常糟糕。最后这个路由功能在
+发行版中默认关闭。
+4）元数据管理工具（Metadata）
+Kylin是一款元数据驱动型应用程序。元数据管理工具是一大关键性组件，用于对保存在Kylin
+当中的所有元数据进行管理，其中包括最为重要的cube元数据。其它全部组件的正常运作都需
+以元数据管理工具为基础。 Kylin的元数据存储在hbase中。 
+5）任务引擎（Cube Build Engine）
+这套引擎的设计目的在于处理所有离线任务，其中包括shell脚本、Java API以及Map Reduce任务
+等等。任务引擎对Kylin当中的全部任务加以管理与协调，从而确保每一项任务都能得到切实执行
+并解决其间出现的故障。
+
+2.kylin cube增量构建及kylin优化: 见实时数仓第三天。
+
+3.kylin cube构建步骤:见kylin构建流程ppt
+
+4.clickhouse如何实现去重处理?
+ClickHouse 在使用 ReplacingMergeTree 进行去重时要注意：
+1).只能根据主键去重。
+2).去重的时候只会去重相同分区的数据，跨分区不会去重，即使是使用 OPTIMIZE **** XXX FINAL 也不会跨分区去重。
+如果一定要使用这个特性去重，只能将需要去重的数据放在同一个分区。
+也就是说clickhouse不能全局分布式去重。
+
+5.clickhouse速度为什么这么快?
+1).分布式、数据压缩、ClickHouse列式存储数据库，所以快；
+   也因为 ClickHouse 使用了向量化引擎，所以快,但是这都不是主要原因,因为hbase等其它数据库
+   也是这种设计，clickhouse的自下而上的设计及CPU等极致的硬件利用率追求才是核心区别。
+2).在设计软件架构的时候，做设计的原则应该是自顶向下地去设计,
+而ClickHouse采用了自下而上架构设计,追求极致性能的设计思路。
+3).极致的硬件使用,CPU L3级别的缓存及多核并行处理,多核多节点并行化大型查询。
+
+6.clickhouse的架构:
+架构
+    ClickHouse是一个完全面向列式的分布式数据库。数据通过列存储，在查询过程中，
+数据通过数组来处理(向量或者列Chunk)。当进行查询时，操作被转发到数组上，而不是在特定
+的值上。因此被称为”向量化查询执行”，相对于实际的数据处理成本，向量化处理具有更低的
+转发成本。
+1).Columns（列）：为了表示内存中的列(列的 chunks)，IColumn将被使用。这个接口提供了
+  一些辅助方法来实现不同的关系操作符。几乎所有的操作符都是非更改的：他们不能更改
+  原有的列，但是创建一个新的更新的列。不同的IColumn实现(ColumnUInt8,ColumnString等)
+  负责列的内存布局。内存布局通常是一个连续的数组。
+2).Data Types（数据类型）：IDataType 负责序列化和反序列化: 读写这个列的值或者以二进
+  制或文本的方式的值.IDataType 直接与表中的数据类型一致。IDataType 仅存储元数据。
+3).Block（数据块）：一个数据块是一个容器，代表了内存中一个表的子集。它也是三元组的
+  集合:(IColumn,IDataType,columnname). 在查询执行过程中, 数据通过数据块来处理. 
+  如果你有一个数据块， 我们有数据(在IColumn对象中), 我们有这个数据的类型(在IDataType
+  中) 告诉我们怎样处理此列，同时我们有此列名称。
+4).Block Streams（数据块流）：数据块流用于处理数据。我们使用数据块的数据流从某处读取
+  数据，执行数据转换或者写入数据到某处。IBlockInputStream 有一个read方法获取下一个
+  数据块。IBlockOutputStream 有一个write方法发送数据块到某处。
+5).I/O：对于面向字节的输入/输出。有 ReadBuffer 和 WriteBuffer 抽象类。
+6).Tables：表通过IStorage接口来表示。对此接口不同的实现成为不同的表引擎。最重要的
+  IStorage 方法是读和写操。
+7).Functions：普通函数并不能改变行的数量 – 他们单独处理每个行。事实上，对于每个行，
+  函数不能被调用，但是对于数据块的数据可实现向量化查询执行。
+8).Aggregate Functions：聚合函数是状态函数。 他们积累传递的值到某个状态, 允许你从
+  这个状态获得结果。他们用IAggregateFunction来管理。
+ 
+7.clickhouse的应用场景:
+应用场景：
+ 用于结构良好清晰且不可变的事件或日志流分析。
+不适合的场景：
+ 事务性工作(OLTP)，高请求率的键值访问，低延迟的修改或删除已存在数据，Blob或文档存储，
+超标准化数据。
+
+8.clickhouse表引擎有哪些?
+参考:https://www.cnblogs.com/javazyh/p/13093552.html
+1).tinylog 
+2).memory
+3).merge
+4).mergetree
+5).replacingmergetree
+6).summingmergertree
+7).distributed 
+
+flink总结:
+1.flink checkpoint的流程:
+   flink中两阶段提交是为了保证端到端的Exactly Once，主要依托checkpoint机制来实现，
+先看一下checkpoint的整体流程:
+1). jobMaster 会周期性的发送执行checkpoint命令(start checkpoint)；
+2).当source端收到执行指令后会产生一条barrier消息插入到input消息队列中，当处理到
+barrier时会执行本地checkpoint, 并且会将barrier发送到下一个节点，当checkpoint完成之后
+会发送一条ack信息给jobMaster ；
+3). 当DAG图中所有节点都完成checkpoint之后，jobMaster会收到来自所有节点的ack信息，
+那么就表示一次完整的checkpoint的完成；
+4). JobMaster会给所有节点发送一条callback信息，表示通知checkpoint完成消息，这个过程是异步的，并非必须的，方便做一些其他的事情，例如kafka offset提交到kafka。
+
+2.Flink + Kafka 0.11端到端精确一次处理语义的实现。
+幂等性(特点:offet支持数据重传的max、min、count(distinct xxx)操作)和
+checkpoint两阶段提交来保证数据有且仅有一次消费。
+
+3.Flink中实现两阶段提交operator
+这种operator的管理有些复杂，这也是为什么Flink提取了公共逻辑并封装进TwoPhaseCommitSinkFunction抽象类的原因。
+
+下面讨论一下如何扩展TwoPhaseCommitSinkFunction类来实现一个简单的基于文件的sink。若要实现支持EOS的文件sink，我们需要实现以下4个方法：
+
+1).beginTransaction：开启一个事务，在临时目录下创建一个临时文件，之后，写入数据到该文件中
+2).preCommit：在pre-commit阶段，flush缓存数据块到磁盘，然后关闭该文件，确保再不写入新数据到该文件。同时开启一个新事务执行属于下一个checkpoint的写入操作
+3).commit：在commit阶段，我们以原子性的方式将上一阶段的文件写入真正的文件目录下。注意：这会增加输出数据可见性的延时。通俗说就是用户想要看到最终数据需要等会，不是实时的。
+4).abort：一旦终止事务，我们离自己删除临时文件
+   当出现崩溃时，Flink会恢复最新已完成快照中应用状态。需要注意的是在某些极偶然的场景
+下，pre-commit阶段已成功完成而commit尚未开始（也就是operator尚未来得及被告知要开启
+commit），此时倘若发生崩溃Flink会将opeartor状态恢复到已完成pre-commit但尚未commit的状
+态。
+    在一个checkpoint状态中，对于已完成pre-commit的事务状态，我们必须保存足够多的信息，
+这样才能确保在重启后要么重新发起commit亦或是终止掉事务。本例中这部分信息就是临时文件
+所在的路径以及目标目录。
+    TwoPhaseCommitSinkFunction考虑了这种场景，因此当应用从checkpoint恢复之后
+TwoPhaseCommitSinkFunction总是会发起一个抢占式的commit。这种commit必须是幂等性的，
+虽然大部分情况下这都不是问题。本例中对应的这种场景就是：临时文件不在临时目录下，而是
+已经被移动到目标目录下。
+
+4.flink和sparkstreaming的区别?
+1).sparkstreaming是微批处理,以批模拟流处理的机制,数据来一批处理一批,可以通过时间间隔
+或者
+
+2).spark是基于微批的,而且流水线优化做的很好,所以说他的吞入量是最大的,
+但是付出了延迟的代价,它的延迟是秒级;
+而Flink是基于事件的,消息逐条处理,而且他的容错机制很轻量级,所以他能在兼顾高吞吐量的
+同时又有很低的延迟,它的延迟能够达到毫秒级;
+ 
+3).时间机制
+SparkStreaming只支持处理时间, 折中地使用processing time来近似地实现event time相关的业务。显然，使用processing time模拟event time必然会产生一些误差， 特别是在产生数据堆积的时候，误差则更明显，甚至导致计算结果不可用
+Structured streaming 支持处理时间和事件时间，同时支持 watermark 机制处理滞后数据
+Flink 支持三种时间机制：事件时间，注入时间，处理时间，同时支持 watermark 机制处理迟到的数据,说明Flink在处理乱序大实时数据的时候,优势比较大
+
+4).Flink支持有且仅有一次消费,而SparkStreaming只能保证数据不丢失,sink时不能保证数据不重复。
+
+5). Spark Streaming 在运行时的主要角色包括： Master、Worker、Driver、Executor，
+Flink 在运行时主要包含： Jobmanager、Taskmanager和Slot。
+
+参考:https://blog.csdn.net/wppwpp1/article/details/106025460
+     https://chbxw.blog.csdn.net/article/details/107219363
+     https://www.aboutyun.com/thread-28127-1-1.html
+状态管理、时间机制、水印watermark、窗口、UDF
+
+数据仓库主题:
+1).用户
+2).设备
+3).营收主题
+4).内容主题
+5).主播主题
+6).流量主题
+咖啡、
+
+
+Atlas是如何实现数据溯源的？
+Atlas主要通过Hook方式让Hive将元数据信息通过Apache Kafka传送过来。
+
+Atlas使用了JanusGraph[2]做图数据存储引擎。借助JanusGraph，数据血缘关系主要通过图的形式
+进行存储在Hbase中，每个节点的详细信息存储在Solr中。
+
+除了前端UI，Atlas还支持第三方应用通过API、Kafka获取数据血缘相关信息。
+
+
+Flink有两种基本类型的状态：托管状态（Managed State）和原生状态（Raw State）。
+从名称中也能读出两者的区别：Managed State是由Flink管理的，Flink帮忙存储、恢复和优化，
+Raw State是开发者自己管理的，需要自己序列化。
+参考: https://zhuanlan.zhihu.com/p/104171679
+参考: https://www.cnblogs.com/ssqq5200936/p/11026735.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 

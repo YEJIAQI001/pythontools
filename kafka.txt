@@ -1,0 +1,259 @@
+kafka面试题总结:
+1.分布式的情况下，kafka如何保证消息的顺序？
+1).一个 topic，一个 partition，一个 consumer，内部单线程消费，单线程吞吐量太低，
+一般不会用这个。
+2).只要把同一个表的同一个主键的数据发到同一个分区即可（如果多数据库得加入数据库名）
+3).结合下游Flink消费者Event time+watermark机制可以实现全局有序且不影响性能;
+【kafka默认只能保证单个分区内数据是有序的,可通过下游spark streaming消费者的Event Time机制并结合watermark机制,
+设置一个时间延迟,到了设置时间点(如30ms)进行统计,将延迟未达到spark streaming的数据写出到kafka topic存储来保证
+】
+
+2.kafka如何保证数据不被重复消费并且不丢失数据  
+实现Exactly-Once语义参考方案:消费者将关闭自动提交offset的功能(即enable.auto.commit置为false)且不再手动提交offset(即不指定consumer.commitSync()和consumer.commitAsync()) ==> 就不在使用__consumer_offsets这个内部Topic来记录其offset,而是由消费者自己来保存offset(可以借助外部第三方存储系统如:关系型数据库[Mysql]、分布式文件存储系统[HDFS、Amazon S3 或NFS]或借助HBase来存储其Offset),最后利用事务的原子性将保存offset和消息处理结果放在一个事务中。
+1).数据来源(kafka生产数据):生产者数据不丢失
+      同步模式：手动设置为acks参数为-1保证producer写入所有副本才算生产者发送数据成功
+      异步模式，设置buffer参数为-1,即不限制阻塞超时时间。就是一满生产者就阻塞
+2)消费者消费:消费者sparkstreaming处理过程:使用spark streaming直接API(Direct API),且借助zookeeper手动
+ 自己维护kafka offset,记录每次消费topic的offset
+ 同时开启sparkstreaming的checkpoint机制,利用SparkStreaming维护血源的依赖机制恢复找到之前消费的位置
+ 保证数据不丢失和不重复消费
+3)数据去路(数据输出)
+1).幂等操作，重复消费不会产生问题即count(distinct 字段名称)、avg(字段名称)、max(字段名称)此类操作,非sum类操作
+2).事务性操作,对于非幂等性如sum,count(字段)等与重复相关的操作kafka新版本中提供了支持下游消费者实现事务的特性,
+   需要下游消费者在输出数据到数据库如hbase、redis、mysql中的时候自己实现事务保证数据不重复。
+
+3.kafka消息积压,Kafka消费能力不足怎么处理?
+1).如果是Kafka消费能力不足,则可以考虑增加Topic的分区数,并且同时提升消费组的消费者数量,
+ 消费者数=分区数。(两者缺一不可)
+2).如果是下游数据处理不及时:增加下游数据处理的并行度,提高每批次拉取的数量(增加分区等),
+ 批次拉取数据过少(拉取数据/处理时间<生产速度,使处理的数据小于生产的数据,也会造成数据积压)
+参考:https://blog.csdn.net/weixin_42310279/article/details/98474909?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1
+
+4.kafka元数据存在哪里?为什么不能存在zk?
+元数据不存存放在zk中,因为zk中leader负责数据读写,而
+leader只有一个,不支持高并发读写,海量的数据就会导致kafka性能低下;
+通常kafka数据存放在hbase或者redis中,hbase和redis支持高并发读写;
+
+5.kafka速度为什么那么快?
+参考:https://juejin.im/post/6860710388380958734#heading-7
+1).利用partition来实现并行处理。
+2).顺序写磁盘,充分利用磁盘特性。不通过读写模式去修改文件,而是直接删除整个segment文件达到删除partition分区内的数据。
+3).利用了现代操作系统分页存储Page Cache来利用内存提高I/O效率。
+4).采用了零拷贝技术。
+5).写数据采用批量发送 + 压缩来减少网络传输次数,减少CPU消耗。
+6).读数据采用 sendfile,将磁盘文件读到 OS 内核缓冲区后,转到 NIO buffer进行网络发送。
+
+
+
+6.Kafka0.8版本与Kafka0.10版本的区别,且0.10较0.8有什么新特性?
+1).Stream:提供了Stream语义,支持流计算
+2).时间戳:所有Kafka的消息都包含了时间戳字段(该消息产生的时间),能让Kafka Streams处理基于
+事件时间的流处理,可以通过时间戳来寻找消息或基于事件时间戳进行垃圾回收等。
+3)API层面也相差较大
+4)0.8是将个consumer的offset保存在zookeeper中,而0.10是保存在__consumer_offsets内部topic中
+5)生产消费端参数控制发送和消费请求更丰富如max.poll.records控制返回的数据条数
+ 
+7.kafka消息分区选择策略?
+Kafka消息分发机制: 	--基于DefaultPartitioner分区类进行消息分发
+(1).指定partition发送:生产端发送的消息通过消息体的某个字段对分区数或某个数字取模就发送到特定的分区下。
+(2).带Key发送:producer端发送的record中携带key,则根据murmur2哈希算法对keyBytes计算得到一个哈希值,并将该哈希值对分区数取模得到分区号。
+(3).即没有指定分区也没有指定key,则采用默认分区策略即round-robin轮询。
+
+8.kafka高水位?(参考:https://www.cnblogs.com/taek/p/5878666.html)
+参考:https://blog.csdn.net/fedorafrog/article/details/104100235
+high watermark的定义?
+HW(high watermark)表示的是所有ISR中的节点都已经复制完的(replicated)消息的offset.也是消费者所能获取到
+的消息的最大offset,所以叫做high watermark。0.11版本已经fix掉了这个问题,采用leader epoch来解决HW更新错配数据不一致(O_O)?)
+high watermark的作用?或者说为什么要出现?
+1).定义消息可见性，也就是用来标识分区下的哪些消息是可以被消费者消费的；
+2).实现Kafka完成ISR副本同步。
+high watermark的不足?
+Leader副本高水位更新和Follower副本高水位更新在时间上存在延迟可能导致数据丢失或者数据不一致,
+社区在0.11版本正是引入Leader Epoch概念，规避高水位更新错配导致的数据不一致问题。
+(
+依托于高水位，Kafka既界定了消息的对外可见性，又实现了异步的副本同步机制。但还是要思考一下这里存在的问题。从刚才的分析中，我们知道，Follower副本的高水位更新需要一轮额外的拉取请求才能实现，如果把上面例子扩展到多个Follower副本，可能需要多轮拉取请求。也就是说，Leader副本高水位更新和Follower副本高水位更新在时间上存在错配，这种错配是很多“数据丢失”或“数据不一致”问题的根源。基于此，社区在0.11版本正是引入Leader Epoch概念，规避高水位更新错配导致的各种不一致问题。
+) 
+high watermark不足的解决办法?
+Leader Epoch机制规避这种数据丢失。解决Kafka高水位可能消息错配导致的数据丢失问题。
+kafka高水位的实现流程:https://www.cnblogs.com/taek/p/5878666.html
+
+9.kafka消费组重平衡?ConsumerGroup Rebalance
+消费组重平衡的原理是什么?以及消费组重平衡发生的场景是什么?
+   所谓的再平衡，指的是在kafka consumer所订阅的topic发生变化时发生的一种分区
+重分配机制。一般有三种情况会触发再平衡：
+1).consumer group中的新增或删除某个consumer即消费者组新增或删除某个消费者
+  导致其所消费的分区需要分配到组内其它的consumer上；
+2).consumer订阅的topic发生变化，比如订阅的topic采用的是正则表达式的形式，如test-*此时如果有一个新建了一个topic test-user，那么这个topic的所有分区也是会自动分配给当前的consumer的，此时就会发生再平衡；
+3).consumer所订阅的topic发生了新增分区的行为，那么新增的分区就会分配给当前的consumer，此时就会触发再平衡。
+
+kafka消费组重平衡策略主要有三种：Round Robin，Range和Sticky，默认使用的是Range。
+这三种分配策略的主要区别在于：
+1).Round Robin：会采用轮询的方式将当前所有的分区依次分配给所有的consumer；
+2).Range：首先会计算每个consumer可以消费的分区个数，然后按照顺序将指定个数范围的分区分配给
+  各个consumer；
+3).Sticky：这种分区策略是最新版本中新增的一种策略，其主要实现了两个目的：
+将现有的分区尽可能均衡的分配给各个consumer，存在此目的的原因在于Round Robin和
+Range分配策略实际上都会导致某几个consumer承载过多的分区，从而导致消费压力不均衡；
+如果发生再平衡，那么重新分配之后在前一点的基础上会尽力保证当前未宕机的consumer
+所消费的分区不会被分配给其他的consumer上；
+
+
+10.kafka日志留存(log retention)策略
+参考:https://www.cnblogs.com/huxi2b/p/8042099.html
+留存机制共有3种：
+1).基于空间维度
+Kafka定期为那些超过磁盘空间阈值的topic进行日志段的删除。这个阈值由broker端参数
+log.retention.bytes和topic级别参数retention.bytes控制，默认是-1，表示Kafka当前未
+开启这个留存机制，即不管topic日志量涨到多少，Kafka都不视其为“超过阈值”。
+如果用户要开启这种留存机制，必须显式设置log.retention.bytes（或retention.bytes）。
+2).基于时间维度
+指的是Kafka定期未那些超过时间阈值的topic进行日志段删除操作。这个阈值由broker端参数
+log.retention.ms、log.retention.mintues、log.retention.hours以及topic级别参数retention.ms控制。
+如果同时设置了log.retention.ms、log.retention.mintues、log.retention.hours，以log.retention.ms
+优先级为最高，log.retention.mintues次之，log.retention.hours最次。
+当前这三个参数的默认值依次是null, null和168，故Kafka为每个topic默认保存7天的日志。
+3).基于起始位移维度
+社区在0.11.0.0引入了第三种留存机制：基于起始位移
+指分区日志的当前起始位移——注意它是分区级别的值，而非日志段级别。故每个分区都只维护一个起始位移值。该值在初始化时被设置为最老日志段文件的基础位移(base offset)，随着日志段的不断删除，该值会被更新当前最老日志段的基础位移。另外Kafka提供提供了一个脚本命令帮助用户设置指定分区的起始位移：kafka-delete-records.sh。
+
+11.聊一聊你对Kafka的Log Compaction的理解
+     日志压缩（Log Compaction）：针对每个消息的 key 进行整合，对于有相同 key 的不同 
+ value 值，只保留最后一个版本。
+ 如果要采用日志压缩的清理策略，就需要将 log.cleanup.policy 设置为“compact”，并且还
+ 需要将 log.cleaner.enable （默认值为 true）设定为 true。如果应用只关心 key 对应的
+ 最新 value 值，则可以开启 Kafka 的日志清理功能，Kafka 会定期将相同 key 的消息进行
+ 合并，只保留最新的 value 值。
+
+12.kafka cap理论
+参考:https://www.cnblogs.com/weiyiming007/p/12187668.html
+CAP理论概述:
+一致性、可用性、分区容错性简称Kafka CAP理论;
+分布式系统中，一致性、可用性、分区容错性不可兼得，最多只可同时满足两个。
+一致性:在分布式系统中的所有数据备份，在同一时刻是否同样的值。
+可用性:在集群中一部分节点故障后，集群整体是否还能响应客户端的读写请求。
+分区容忍性:以实际效果而言，分区相当于对通信的时限要求。系统如果不能在时限内达成数据一致性，就意味着发生了分区的情况，必须就当前操作在C和A之间做出选择。
+
+C(一致性)：不管访问集群中的哪个节点，返回的结果都是一样的。
+
+A(可用性)：集群中的一个或者某个节点挂掉，仍然可以提供服务。
+
+P(分区容忍性)：集群内部出现通信故障，服务A的数据没法同步到其他节点时，客户端访问服务A，服务A仍然能返回未同步到其他节点的数据。
+
+13.Kafka HA Kafka一致性重要机制之ISR(kafka replica)?
+参考:https://blog.csdn.net/qq_37502106/article/details/80271800
+
+14.kafka的leader选举过程
+参考:https://www.cnblogs.com/aspirant/p/9179045.html
+
+15.Kafka和RabbitMQ的比较?为什么选择Kafka?
+参考:https://www.cnblogs.com/zongyl/p/8064220.html
+1).从吞吐量上看，在不要求消息顺序情况下，Kafka完胜；
+2).在要求消息先后顺序的场景，性能应该稍逊RabbitMQ（此时Kafka的分片数只能为1）。
+3).从稳定性来看，RabbitMQ胜出，但是Kafka也并不逊色多少。
+
+16.聊一聊Kafka的延时操作的原理
+   Kafka 中有多种延时操作，比如延时生产，还有延时拉取（DelayedFetch）、
+延时数据删除（DelayedDeleteRecords）等。
+延时操作创建之后会被加入延时操作管理器（DelayedOperationPurgatory）来做专门的处理。
+延时操作有可能会超时，每个延时操作管理器都会配备一个定时器（SystemTimer）来做超时
+管理，定时器的底层就是采用时间轮（TimingWheel）实现的。
+
+17.聊一聊Kafka控制器的作用
+   在Kafka 集群中会有一个或多个 broker，其中有一个 broker 会被选举为控制器
+   （Kafka Controller），它负责管理整个集群中所有分区和副本的状态。当某个分区的
+leader 副本出现故障时，由控制器负责为该分区选举新的 leader 副本。当检测到某个分区的
+ISR 集合发生变化时，由控制器负责通知所有broker更新其元数据信息。当使用 
+kafka-topics.sh 脚本为某个 topic 增加分区数量时，同样还是由控制器负责分区的重新分配。
+
+18.Kafka中的幂等是怎么实现的？
+  为了实现生产者的幂等性，Kafka 为此引入了 producer id（以下简称 PID）和序列号
+ （sequence number）这两个概念。
+  每个新的生产者实例在初始化的时候都会被分配一个 PID，这个 PID 对用户而言是完全透明的。
+对于每个 PID，消息发送到的每一个分区都有对应的序列号，这些序列号从0开始单调递增。
+生产者每发送一条消息就会将 <PID，分区> 对应的序列号的值加1。
+  broker 端会在内存中为每一对 <PID，分区> 维护一个序列号。对于收到的每一条消息，
+只有当它的序列号的值（SN_new）比 broker 端中维护的对应的序列号的值（SN_old）大1
+（即 SN_new = SN_old + 1）时，broker 才会接收它。如果 SN_new< SN_old + 1，那么说明
+消息被重复写入，broker 可以直接将其丢弃。如果 SN_new> SN_old + 1，那么说明中间有数据
+尚未写入，出现了乱序，暗示可能有消息丢失，对应的生产者会抛出
+OutOfOrderSequenceException，这个异常是一个严重的异常，后续的诸如 send()、
+beginTransaction()、commitTransaction() 等方法的调用都会抛出 IllegalStateException
+的异常。
+
+19.Kafka中有哪些索引文件？
+每个日志分段文件对应了两个索引文件，主要用来提高查找消息的效率。
+偏移量索引文件用来建立消息偏移量（offset）到物理地址之间的映射关系，方便快速定位消息所在的物理文件位置
+时间戳索引文件则根据指定的时间戳（timestamp）来查找对应的偏移量信息。
+
+20.如果我指定了一个offset，Kafka怎么查找到对应的消息？
+Kafka是通过seek() 方法来指定消费的，在执行seek() 方法之前要去执行一次poll()方法，
+等到分配到分区之后会去对应的分区的指定位置开始消费，如果指定的位置发生了越界，
+那么会根据auto.offset.reset 参数设置的情况进行消费。
+
+21.如果我指定了一个timestamp，Kafka怎么查找到对应的消息？
+  Kafka提供了一个 offsetsForTimes() 方法，通过 timestamp 来查询与此对应的分区位置。
+offsetsForTimes() 方法的参数 timestampsToSearch 是一个 Map 类型，key 为待查询的分区，
+而 value 为待查询的时间戳，该方法会返回时间戳大于等于待查询时间的第一条消息对应的
+位置和时间戳，对应于 OffsetAndTimestamp 中的 offset 和 timestamp 字段。
+
+22.简述Kafka的日志目录结构?
+  Kafka 中的消息是以主题为基本单位进行归类的，各个主题在逻辑上相互独立。每个主题又
+可以分为一个或多个分区。不考虑多副本的情况，一个分区对应一个日志（Log）。为了防止 
+Log 过大，Kafka 又引入了日志分段（LogSegment）的概念，将 Log 切分为多个 LogSegment，
+相当于一个巨型文件被平均分配为多个相对较小的文件。
+  Log 和 LogSegment 也不是纯粹物理意义上的概念，Log 在物理上只以文件夹的形式存储，
+  而每个 LogSegment 对应于磁盘上的一个日志文件和两个索引文件，以及可能的其他
+  文件（比如以“.txnindex”为后缀的事务索引文件）
+
+23.Kafka有哪几处地方有分区分配的概念？简述大致的过程及原理
+1).生产者的分区分配是指为每条消息指定其所要发往的分区。可以编写一个具体的类实现org.apache.kafka.clients.producer.Partitioner接口。
+2).消费者中的分区分配是指为消费者指定其可以消费消息的分区。Kafka 提供了消费者客户端参数 partition.assignment.strategy 来设置消费者与订阅主题之间的分区分配策略。
+3).分区副本的分配是指为集群制定创建主题时的分区副本分配方案，即在哪个 broker 中创建哪些分区的副本。kafka-topics.sh 脚本中提供了一个 replica-assignment 参数来手动指定分区副本的分配方案。
+
+24.Kafka目前有哪些内部topic，它们都有什么特征？各自的作用又是什么？
+1).__consumer_offsets：作用是保存 Kafka 消费者的位移信息
+2).__transaction_state：用来存储事务日志消息
+
+25.优先副本是什么？它有什么特殊的作用？
+  所谓的优先副本是指在AR集合列表中的第一个副本。
+理想情况下，优先副本就是该分区的leader 副本，所以也可以称之为 preferred leader。
+Kafka 要确保所有主题的优先副本在 Kafka 集群中均匀分布，这样就保证了所有分区的 leader 
+均衡分布。以此来促进集群的负载均衡，这一行为也可以称为“分区平衡”。
+ 
+26.kafka消息的存储机制?
+1).Kafka把topic中一个parition大文件分成多个segment小文件。通过segment小文件，就容易定期删除已经消费完的文件。降低磁盘占用。
+2).通过索引信息能够高速定位message和确定response的最大大小。
+3).通过将index元数据映射到内存，能够避免segment file的IO磁盘操作。
+4).通过索引文件稀疏存储，能够大幅降低index文件元数据占用空间大小。
+ 
+27.如何保证接着offset消费的数据正确性
+为了确保consumer消费的数据一定是接着上一次consumer消费的数据
+必须当consumer重启消费数据时,记录第一次取出的数据,将其offset和上次consumer最后消费的offset进行对比,
+如果相同则继续消费,如果不同,则停止消费,检查原因。
+
+28.kafka负载均衡原理
+   producer根据用户指定的算法，将消息发送到指定的partition
+存在多个partiiton，每个partition有自己的副本，多个副本分布在不同的Broker节点上，
+这些副本需要选取出一个lead,lead负责读写，并由zookeeper负责fail over
+通过zookeeper管理broker与consumer的动态加入与分离。
+
+29.如何提高kafka的效率--即如何优化？(参考:https://www.jianshu.com/p/c575c7aec4dd)
+1).将不同磁盘的多个目录配置到broker的log.dirs
+2).增加topic的partition数量
+3).操作线程配置优化，
+4).jvm参数调优等等;
+
+30.kafka如何实现事务的?
+  实现事务机制最关键的概念就是事务的唯一标识符（ TransactionalID ），Kafka 使用 
+TransactionalID 来关联进行中的事务。TransactionalID 由用户提供，这是因为 Kafka 
+作为系统本身无法独立的识别出宕机前后的两个不同的进程其实是要同一个逻辑上的事务。
+对于同一个生产者应用前后进行的多个事务，TransactionalID 并不需要每次都生成一个新的。
+这是因为 Kafka 还实现了 ProducerID 以及 epoch 机制。这个机制在事务机制中的用途主要
+是用于标识不同的会话，同一个会话 ProducerID 的值相同，但有可能有多个任期。
+ProducerID 仅在会话切换时改变，而任期会在每次新的事物初始化时被更新。这样，
+同一个 TransactionalID 就能作为跨会话的多个独立事务的标识。
+
+
+ 
+ 
+ 

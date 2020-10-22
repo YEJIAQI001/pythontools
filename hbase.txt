@@ -1,0 +1,260 @@
+hbase知识点汇总(http://www.bigdatastudy.net/show.aspx?cid=14&id=160
+                https://www.cnblogs.com/bigdata-stone/p/9374751.html)
+                https://www.cnblogs.com/yuguoshuo/p/6265639.html
+                https://my.oschina.net/firstBlooded/blog/646718
+                http://www.cnblogs.com/chaoren399/p/4714814.html
+                http://www.bigdatastudy.net/show.aspx?id=159&cid=14
+1.hbase预分区的方式:
+HBase的预分区
+## 方式一:
+hbase> create 't1', 'f1', SPLITS => ['10', '20', '30', '40']
+ 
+ create 't1','f1',splits=>['10','20','40']
+ 
+## 方式二:
+hbase> create 't1', 'f1', SPLITS_FILE => 'splits.txt'
+[create 'ocean2', 'info', SPLITS_FILE => '/opt/data/splits.txt'
+create 'ocean3', 'data', {NUMREGIONS => 13, SPLITALGO => 'HexStringSplit'}]
+
+## 方式三:
+create 't5','info',{NUMREGIONS => 15, SPLITALGO => 'HexStringSplit'}
+## 将0~eeeeeeee这部分尽量等分成NUMREGIONS-1份,将大于eeeeeeee的部分分成一份
+
+2.rowkey设计的原则:
+	1).必须要唯一,不能重复
+	2).rowkey的长度不超过10-100字节,实际环境中不建议超过8-16字节[为避免热点,我们项目的hbase rowkey只有一个cf]
+	3).符合我们业务需求,而且尽量满足更多的业务
+	4).避免数据热点和倾斜[散列原则]
+ 	
+	## 为避免数据倾斜的问题
+	## 解决方案一:生成一个在一定范围内的随机的rowkey
+		Put put = new Put(rowkey)
+	
+	## 解决方案二:时间字符串反转
+	## 设计预分区
+	[0~10615191216102)
+	[10615191216102~20615191216102)
+	[20615191216102~30615191216102)
+	[30615191216102~40615191216102)
+	[40615191216102~50615191216102)
+	[50615191216102~60615191216102)
+	...
+	
+		时间				反转之后
+	20161219151602		20615191216102
+	20161219151605		50615191216102
+	20161219151607		70615191216102
+	20161219151608		80615191216102
+	20161219151621		12615191216102
+
+	## 解决方案三:时间+随机值
+	## 设计预分区
+	[0~201612190000)
+	[201612190000~201612191111)
+	...
+	[20161219eeee~正无穷)
+		时间				加随机值
+	20161219151602		20161219abcd
+	20161219151605		20161219dbca
+	20161219151607		201612191001
+	20161219151608		201612192331
+	20161219151621		20161219431a			
+  我们项目主要采用酒店ID+时间戳来设计的rowkey,为避免热点,我们项目的hbase rowkey只有一个cf
+
+3. Rowkey散列原则
+	如果Rowkey 是按时间戳的方式递增，不要将时间放在二进制码的前面，建议将Rowkey
+的高位作为散列字段，由程序循环生成，低位放时间字段，这样将提高数据均衡分布在每个
+Regionserver实现负载均衡几率。如果没有散列字段，首字段直接是时间信息将产生所有
+新数据都在一个 RegionServer 上堆积的热点现象，这样在做数据检索的时候负载将会集中
+在个别RegionServer，降低查询效率。 
+
+..................................................................建议将Rowkey的高位字段作为散列字段,由程序循环生成,
+
+4.描述Hbase中scan(扫描器)和get的功能以及实现的异同
+HBase的查询实现只提供两种方式：
+1、按指定RowKey 获取唯一一条记录，get方法（org.apache.hadoop.hbase.client.Get）
+Get 的方法处理分两种 : 设置了ClosestRowBefore 和没有设置的rowlock .主要是用来保证行的事务性，即每个get 是以一个row 来标记的.一个row中可以有很多family 和column.
+2、按指定的条件获取一批记录，scan方法(org.apache.Hadoop.hbase.client.Scan）实现条件查询功能使用的就是scan 方式.
+1)scan 可以通过setCaching 与setBatch 方法提高速度(以空间换时间)；
+2)scan 可以通过setStartRow 与setEndRow 来限定范围([start，end)start 是闭区间，
+end 是开区间)。范围越小，性能越高。
+3)、scan 可以通过setFilter 方法添加过滤器，这也是分页、多条件查询的基础。
+    scan可以通过setFilter方法添加过滤器,这也是分区、多条件查询的基础。
+ 
+5.请描述如何解决Hbase中region太小和region太大带来的冲突.
+	Region过大会发生多次compaction，将数据读一遍并重写一遍到hdfs 上，占用io，region过小会造成多次split，region 会下线，影响访问服务，
+调整hbase最大文件大小参数为256m:hbase.hregion.max.filesize 为256m.
+    
+	
+6. 请详细描述Hbase中一个Cell 的结构
+HBase 中通过rowkey 和列簇(columns) 确定的为一个存贮单元称为cell。
+Cell：由{row key, column(=<family> + <label>), version}唯一确定的单元。cell 中的数
+据是没有类型的，全部是字节码形式存贮。
+
+7.HBase读负载均衡
+    分裂发生在同一个RegionServer中，但由于负载均衡的原因，HMaster可能会把新的Region移动到其他服务器上去。
+这样会导致新的Region管理的数据在远端的HDFS Datanode上，直到主压缩过程把远端的数据移动到RegionServer所在的服务器。
+HBase数据在写入时会写在本地，当一个Region被移动时（由于负载均衡和数据恢复等原因），数据将不在本地，主压缩过程会重新使数据回到本地。
+
+8.hbase的架构:
+1).Client
+包含访问HBase的接口，并维护cache来加快对HBase的访问，比如region的位置信息
+2).Master
+为Region server分配region
+负责Region server的负载均衡
+发现失效的Region server并重新分配其上的region
+管理用户对table的增删改查操作
+3).Region Server
+Regionserver维护region，处理对这些region的IO请求
+Regionserver负责切分在运行过程中变得过大的region
+4).Zookeeper作用
+通过选举，保证任何时候，集群中只有一个master，Master与RegionServers 启动时会向ZooKeeper注册
+存贮所有Region的寻址入口
+实时监控Region server的上线和下线信息。并实时通知给Master
+存储HBase的schema和table元数据
+默认情况下，HBase 管理ZooKeeper 实例，比如， 启动或者停止ZooKeeper
+Zookeeper的引入使得Master不再是单点故障
+
+ 1).保证hmaster和HRegionSever正常通信
+ 2).存贮所有Region的寻址入口
+ 3).存储HBase的schema和table元数据
+
+9.hbase的存储结构
+   HBase包括HMaster、HRegionSever、HRegion、HLog、Store、MemStore、StoreFile、HFile等，
+HMaster的作用：
+1).为HRegionServer分配HRegion,发现失效的HRegionServer并重新分配
+2).负责HRegionServer的负载均衡
+3).HDFS上的垃圾文件回收
+4).处理Schema更新请求 
+  
+HRegionServer的作用：
+1).维护HMaster分配给它的HRegion，处理对这些HRegion的IO请求
+2).负责切分正在运行过程中变得过大的HRegion
+    
+
+HRegion
+	Table在行的方向上分割为多个HRegion，HRegion是HBase中分布式存储和负载均衡的最小单元
+Store
+    每一个HRegion由一个或多个Store组成，至少是一个Store，HBase会把一起访问的数据放在一个Store里面
+
+10.Hbase 和 hive 有什么区别hive 与 hbase 的底层存储是什么？hive是产生的原因是什么？habase是为了弥补hadoop的什么缺陷？
+答案:共同点：1.hbase与hive都是架构在hadoop之上的。都是用hadoop作为底层存储
+　　　区别：2.Hive是建立在Hadoop之上为了减少MapReducejobs编写工作的批处理系统，HBase是为了支持弥补Hadoop对实时操作的缺陷的项目 。
+　　　　　　3.想象你在操作RMDB数据库，如果是全表扫描，就用Hive+Hadoop,如果是索引访问，就用HBase+Hadoop 。
+　　　　　　4.Hive query就是MapReduce jobs可以从5分钟到数小时不止，HBase是非常高效的，肯定比Hive高效的多。
+　　　　　　5.Hive本身不存储和计算数据，它完全依赖于HDFS和MapReduce，Hive中的表纯逻辑。
+　　　　　　6.hive借用hadoop的MapReduce来完成一些hive中的命令的执行
+　　　　　　7.hbase是物理表，不是逻辑表，提供一个超大的内存hash表，搜索引擎通过它来存储索引，方便查询操作。
+　　　　　　8.hbase是列存储。
+　　　　　　9.hdfs作为底层存储，hdfs是存放文件的系统，而Hbase负责组织文件。
+　　　　　　10.hive需要用到hdfs存储文件，需要用到MapReduce计算框架。
+  
+11.简述 HBASE中compact用途是什么，什么时候触发，分为哪两种,有什么区别，有哪些相关配置参数？
+ 在hbase中每当有memstore数据flush到磁盘之后，就形成一个storefile，当storeFile的数量达到一定程度后，就需要将 storefile 文件来进行 compaction 操作。
+Compact 的作用：
+1>.合并文件
+2>.清除过期，多余版本的数据
+3>.提高读写数据的效率
+HBase 中实现了两种 compaction 的方式：minor and major. 这两种 compaction 方式的区别是：
+1、Minor 操作只用来做部分文件的合并操作以及包括 minVersion=0 并且设置 ttl 的过
+期版本清理，不做任何删除数据、多版本数据的清理工作。
+2、Major 操作是对 Region 下的HStore下的所有StoreFile执行合并操作，最终的结果是整理合并出一个文件。
+ 
+12.HBase 宕机如何处理
+答：宕机分为 HMaster 宕机和 HRegisoner 宕机，如果是 HRegisoner 宕机， HMaster 会将其所管理的 region 重新分布到其他活动的 
+RegionServer 上，由于数据和日志都持久在 HDFS中，该操作不会导致数据丢失。所以数据的一致性和安全性是有保障的。如果是 HMaster 宕机， 
+HMaster 没有单点问题， HBase 中可以启动多个 HMaster，通过Zookeeper 的 Master Election 机制保证总有一个 Master 运行。即 ZooKeeper 
+会保证总会有一个 HMaster 在对外提供服务。  
+ 
+13.导致Hbase挂掉的场景(https://www.cnblogs.com/bigdata-stone/p/9374751.html)
+
+14.HBase写数据流程
+1,Client先访问zookeeper，从meta表获取相应region信息，然后读取meta表的数据
+2,根据namespace、表名和rowkey从meta表中找到写入数据对应的region信息
+3,找到对应的regionserver
+4,把数据分别写到HLog和MemStore上各一份
+5,MemStore达到一个阈值后则把数据刷成一个StoreFile文件。（若MemStore中的数据有丢失，则可以总HLog上恢复）
+6,当多个StoreFile文件达到一定的大小后，会触发Compact合并操作，合并为一个StoreFile，（这里同时进行版本的合并和数据删除。）
+7,当Storefile大小超过一定阈值后，会把当前的Region分割为两个（Split），并由Hmaster分配到相应的HRegionServer，实现负载均衡
+
+15.HBase读数据流程
+1,Client先访问zookeeper，从meta表读取region的位置，然后读取meta表中的数据。meta表中又存储了用户表的region信息。
+2,根据namespace、表名和rowkey在meta表中找到对应的region信息
+3,找到这个region对应的regionserver
+4,查找对应的region
+5,先从MemStore找数据，如果没有，再到StoreFile上读(为了读取的效率)。
+参考:https://blog.csdn.net/wypersist/article/details/80115123
+
+hbase基本概念参考:https://blog.csdn.net/woshiwanxin102213/article/details/17584043
+
+
+hbase的存储结构:
+HBase中的每张表都通过行键按照一定的范围被分割成多个子表（HRegion），默认一个HRegion超过256M就要被分割成两个，由HRegionServer管理，管理哪些HRegion由HMaster分配。
+
+HRegionServer存取一个子表时，会创建一个HRegion对象，然后对表的每个列族(Column Family)创建一个Store实例，每个Store都会有0个或多个StoreFile与之对应，每个StoreFile都会对应一个HFile， HFile就是实际的存储文件。因此，一个HRegion有多少个列族就有多少个Store。
+
+另外，每个HRegion还拥有一个MemStore实例。
+参考:https://www.iteye.com/blog/asyty-1250301
+
+16.Hbase 内部是什么机制？(https://blog.csdn.net/weixin_42685589/article/details/81030196)
+
+17.hbase过滤器实现原则?(http://www.doc88.com/p-0186413361467.html)
+
+18.如何提高HBase客户端的读写性能？请举例说明
+我们的hbase 大概在公司业务中（主要是网上商城）大概都有几个表，几个表族，大概都存什么样的数据？
+
+19.简述HBase的瓶颈
+	HBase的瓶颈就是硬传输速度，hbase是一种日志集数据库。它的存储方式，像是日志文件一样。它是批量大量的往硬盘中写，通常都是以文件形式的读写。
+这个读写速度，就取决于硬盘与机器之间的传输有多快。而oracle的瓶颈是硬盘寻到时间。它经常的操作时随机读写。要update一个数据，先要在硬盘中找到这个block，
+这个读写速度，就取决于硬盘与机器之间的传输有多快。而oracle的瓶颈是硬盘寻到时间。它经常的操作时随机读写。要update一个数据，先要在硬盘中找到这个block，
+然后把它读入内存，在内存中的缓存中修改，过段时间再回写回去。由于你寻找的block不通，这就存在一个随机的读。硬盘的寻道时间主要由转速来
+决定。而寻道时间，技术基本没有改变，这就形成了寻道时间瓶颈。
+
+HBase面试题参考:https://zhuanlan.zhihu.com/p/93853964
+
+HBase二级索引:
+原理:二级索引的本质就是建立各列值与行键之间的映射关系;
+第一张表的value是第二张表的rowKey,根据第一张表的RowKey取得Value,也就是第二张表的RowKey,
+如果我没有这种关系,那么我就需要查两次,有二级索引就不需要设计第二张表的RowKey。
+适用什么场景?
+维表之类、多表之间的join等。
+问一下老王或者网易同事。
+
+
+Global Indexes（全局索引）
+上面的覆盖索引和函数索引都属于全局索引，也是 Phoenix 默认的索引创建模式。
+
+全局索引将索引表和数据表分开存储，如以上例子中都会创建一张新的索引表，因此每条数据和其索引数据可能会分布在不同的数据节点上，数据表的添加、删除和修改都会更新相关的索引表，所以写入数据时由于额外的网络开销会带来较大的性能消耗。而查询数据的时候，Phoenix 会通过索引表来快速低损耗的获取数据。因此全局索引更适合读多写少的使用场景。
+
+Local Indexes（本地索引）
+本地索引与全局索引相反，在 4.8.0 版本之后会将索引数据以特定的列簇存储在同一张数据表中，并通过特定的 rowkey 设置，将每条数据及其索引数据存储在同一 region 中，因此在数据写入时防止了额外的网络开销，而在读取数据时因无法提前判断索引数据的准确位置，则会在所有的 region 中检索索引数据，而非常影响读取性能。所以本地索引更适合于写多读少的使用场景。
+
+HBase的二级索引一般会结合其他组件来实现,通常通过结合Phoinx实现二级索引,
+phonix是一个支持OLAP和OLTP的引擎;
+
+19.hbase为什么读取速度那么快?
+ 主要原因是由其架构和底层的数据结构决定的，即由LSM-Tree + HTable(region分区) + 
+ Cache决定——客户端可以直接定位到要查数据所在的HRegion server服务器，然后直接在服务器
+ 的一个region上查找要匹配的数据，并且这些数据部分是经过cache缓存的。
+ 
+ LSM树的优点就是能快速进行数据的合并和拆分。
+
+20.hdfs2解决了hdfs1的哪些问题，增加了哪些特性？
+NameNode HA 
+1）基于NFS共享存储解决方案 
+2）基于Qurom Journal Manager（QJM）解决方案
+NameNode Federation 
+1）存在多个NameNode，每个NameNode分管一部分目录 
+2）NameNode共用DataNode
+
+21.Hbase中为什么要有列族的概念？
+一行有若干列组成,若干列又构成一个列族（column family），这不仅有助于构建数据的语义边
+界或者局部边界，还有助于给他们设置某些特性（如压缩），或者指示他们存贮在内存中，
+一个列族的所有列存贮在同一个底层的存储文件中，这个存储文件叫做HFile。​
+参考:http://blog.sina.com.cn/s/blog_7b9948fd0102wdxn.html
+
+
+22.怎样实现一个ThreadLocal?什么场景下会触发栈信息中ThreadLocal.get()方法频繁调用?
+
+
+

@@ -1,0 +1,769 @@
+hive及数据仓库面试题总结:
+1.
+2.星型模型和雪花模型的区别?
+星型模型和雪花模型的区别在于：维度表是直接连接到事实表还是其他维度表。
+星型模型是的维度表是直接连接到事实表,而雪花模型维度表也会连接到其它维度表。
+
+【星型与雪花模型的对比
+(1) 数据冗余
+星型模型的维表设计不遵循3NF关系模式，维表之间不会直接相连，牺牲了部分存储空间；
+雪花模型符合业务逻辑设计，采用3NF关系模式，有效降低了数据冗余
+
+(2) 模型性能
+   星型模型违反3NF关系模式，采用降维的操作将维度整合，以存储空间为代价有效降低维度表
+的连接数数量，性能较雪花模型高；
+   雪花模型由于存在维度间的关联，采用3NF关系模式降低冗余，通常在使用过程中，需要连接
+更多维表，导致性能偏低
+
+(3) ETL难度
+星型模型在设计维度表时违反3NF关系模式，所以在ETL过程中整合业务数据维度表有一定的难度，
+但由于避免附属维度，可并行化处理；雪花模型符合业务ER模型设计原则，在ETL过程中相对简单，
+但是由于附属模型的限制，ETL任务并行化较低
+ 】
+
+
+
+3.传统数据仓库和大数据数据仓库的区别?
+大数据数据仓库(Hive)与传统数据仓库的比较:
+参考:https://blog.csdn.net/qq_35561207/article/details/86367683
+1》存储：
+   大数据仓库主要是采用Hive,存储在HDFS，理论上有无限扩展的可能性,传统型数据仓库，
+   集群存储,存在容量上限的情况。
+
+2》执行引擎
+1)、HIVE依赖于MapReduce、Spark、TEZ框架，可进行各类优化比较少，但是比较简单。
+2).传统数据仓库可以选择更高效的算法来执行查询，也可以进行更多的优化措施来提高速度。
+
+3》分析速度
+1).hive计算依赖于MapReduce和集群规模，容易去进行拓展，在大数据的情况下远远大于
+普通的数据仓库。
+
+4》可靠性
+Hive的数据存储在HDFS中，可靠性高，容错性高，因为磁盘是可以进行持久化;
+传统的数据仓库可靠性低，一次查询失败需要重新开始，数据容错依赖于磁盘
+
+5》索引
+1).hive索引是比较低效的。目前还不完善
+2).传统数据仓库有健全的索引，
+   (是高效的，因为有类似B+树，以及B树之类索引),因此在查询的速度是十分快的。
+
+
+
+4.数据库和数据仓库的区别? 
+1).本质区别:数据库是一种面向事务的OLTP操作,为业务处理人员提供信息处理的支持
+数据仓库主要是面向主题的OLAP（On-Line Analytical Processing),
+侧重分析,为高层管理人员决策提供支持。
+2).数据库在访问数据时访问频率较高,访问量较少,要求响应速度快，其响应时间一般在几秒内，
+   而数据仓库的访问频率低但访问量高,响应时间较长,延迟较高。
+3).数据库内数据是面向事务的,只存放在当前值,不记录历史状态，数据冗余较低,
+   数据仓库是反应历史变化的,记录历史状态,数据冗余较高。
+
+
+5.olap和oltp的区别?
+OLTP和OLAP主要区别有：
+1)、OLTP是面向事务的联机事务处理，主要是基本的、日常的事务处理，
+    记录即时的增、删、改、查，
+    OLAP是面向主题的联机分析处理，是数据仓库的核心部心，侧重分析。
+
+2)、数据库设计不同：OLTP采用实体-关系模型和面向应用的数据库设计。
+                    OLAP采用星型或雪花模型和面向主题的数据库设计。
+3).OLTP在访问数据时访问频率较高,访问量较少,要求响应速度快，其响应时间一般在几秒内，
+   而OLAP的访问频率低但访问量高,响应时间较长,延迟较高。
+
+                  
+6.数据仓库中的ER实体模型和维度模型比较
+    Inmon的ER实体关系建模优点体现在规范性较好，数据冗余小，数据集成和数据一致性方面
+得到保证，适用于较为大型的企业级、战略级的规划，
+    但缺点是对于建模人员要求很高，实施周期非常长，成本昂贵。
+    Kimball的维度建模相对能开发难度低,开发速度快,开发周期短，成本低,
+但缺点是冗余会较多，灵活性比较差。其实大部分数据仓库这两种方式是并存的,在贴源层和
+明细层采用ER建模,而DWS和DM层使用维度建模更易于快速数据分析。
+
+7.拉链表如何实现的?
+参考:https://www.cnblogs.com/linkmust/p/11289759.html
+开链:
+闭链:
+断链:
+
+8.一个事实表在数据仓库中的生命周期?
+比如用户设备主题
+ods层:
+我们首先在ods层:将数据同步到hive的ods层,如ods_accound_day;
+dwd层:
+ 在dwd层次会有两张明细大的宽表:
+ 按天增量的dwd_accound_day表和全量的dwd_accound_all表,其中dwd_accound_day表为
+ 存储的是每天活跃用户数据,并关联前一天dwd_accound_all的活跃用户来判断新增用户打上is_new
+ 的标签,1代表新增,0代表非新增;dwd_account_all表用前一天的所有活跃用户和dwd_accound_day
+ 今天的新增用户进行union all合并去重得到的用户全量表。
+dws层:对用户活跃表按app_id、product_id、user_id等维度进行轻度汇总 dws_accound_day
+dm层次:对轻度汇总的数据进行聚合得到最终指标数据如dau、新增用户、留存等指标dm_accound_day
+
+9.简单介绍下你们数据仓库如何分层设计以及有哪些主题?
+我们项目分四层设计,来源于埋点系统的日志通过flume采集到ods以及mysql数据通过sqoop同步到
+ods层,dwd是明细数据层,还有维度表dim,dws是轻度汇总层,dm数据集市层;
+我们项目目前主题:用户设备主题、直播主题、录播主题、营收主题、充值消耗主题(金币)、
+流量主题、市场主题、内容主题等。我主要负责用户设备和充值消耗主题。
+
+10.三张hive表join产生几个job?为什么?
+正常情况下产生2个job,当两次关联的key相同时只产生一个job。
+
+11.哪些场景下hive sql执行只产生map不走reduce?
+1).动态分区
+2).union all 
+3).map join不产生shuffle (小表join大表的时候不产生shuffle)
+4).没有count、sum、group by等操作的简单sql不产生shuffle
+
+
+12.hive什么情况下避免MapReduce？
+hive 0.10.0为了执行效率考虑，简单的查询，就是只是select，不带count,sum,group by这样的，都不走map/reduce，
+直接读取hdfs文件进行filter过滤。
+1).为了查询效率，简单查询hive就不走mr，这个是可以设置的，
+  在hive-site.xml里面有个配置参数叫：
+  hive.fetch.task.conversion将这个参数设置为more，简单查询就不走map/reduce了，
+  设置为minimal，
+  就任何简单select都会走map/reduce
+2).使用本地模式
+  select * from table 在这种情况下，hive直接可以读取table对的存储目录下的文件，
+  然后格式化输出到控制台
+3).查询某张表的所有数据
+   select * from xxxx
+
+4).limit抽样查询(hive中limit是抽样，会随机返回对应的记录数。)
+   select * from employees limit 2; 
+5).查询语句中的where过滤条件只是分区字段的情况下不会进行mapreduce
+   where A='' AND B=''
+
+6).设置属性hive.exec.model.local.auto值为true，Hive还会尝试使用本地模式执行
+其他的操作。
+
+13.hive只有map没有reducer的优化
+如果输入数据较多，运行比较慢；
+可以对表进行distribute by，强制让其产生reduce;
+也可以将map的文件大小设置小一点让map个数增加且让map的memory设置大一点。
+
+
+hive中在做查询时，经常会碰到这种问题，任务只起map不起reduce导致运行速度特别慢,
+怎么处理
+如下sql：
+select * from  basic_sum where user_log_acct='abcd';
+这个sql只会起一个job，这个job只有map，没有reduce；输入数据较多，会比较慢；
+可以对表进行distribute by，强制让其产生reduce,这也是避免小文件过多的方法。
+优化后sql如下：
+select * from  basic_sum where user_log_acct='abcd' distribute by rand(1234);
+这个sql会产生reduce；
+参考: https://blog.csdn.net/yisun123456/article/details/81354933?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-2.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-2.channel_param
+
+
+14.hive控制map、reduce个数的方法:
+参考:https://blog.csdn.net/Suxain/article/details/84473735?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param
+
+15.Hive SQL转化为MapReduce的过程?
+整个编译过程分为六个阶段：
+1).Antlr(解释器)定义SQL的语法规则，完成SQL词法，语法解析，将SQL转化为抽象语法树AST Tree
+2).遍历AST Tree，抽象出查询的基本组成单元QueryBlock
+3).遍历QueryBlock，翻译为执行操作树OperatorTree
+4).逻辑层优化器进行OperatorTree变换，合并不必要的ReduceSinkOperator，减少shuffle数据量
+5).遍历执行操作树OperatorTree，翻译为MapReduce任务
+6).物理层优化器进行MapReduce任务的变换，生成最终的执行计划
+
+
+16.如何解决hive小文件过多的问题?
+参考:https://blog.csdn.net/weixin_42582592/article/details/85084575?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-3.channel_param
+方法一:参数设置如:
+//每个Map最大输入大小(这个值决定了合并后文件的数量)
+set mapred.max.split.size=256000000;  
+//执行Map前进行小文件合并
+set hive.input.format=org.apache.hadoop.hive.ql.io.CombineHiveInputFormat;
+
+方法二: 针对按分区插入数据的时候产生大量的小文件的问题, 可以使用DISTRIBUTE BY rand()
+将数据随机分配给Reduce，这样可以使得每个Reduce处理的数据大体一致.
+
+16.窗口函数分析函数总结:
+Hive分析窗口函数(一) SUM,AVG,MIN,MAX:
+  https://www.aboutyun.com/thread-12831-1-1.html
+
+17.如何保证数据仓库的稳定性?
+技术上保证:解耦,尽量避免使用大宽表的方式,替代拆分成多个子表的
+           方式,避免由于大宽表如订单etl异常导致下游大量任务报错无法及时恢复
+
+业务上保证:从业务的角度看尽量将大宽表设计分开设计,并不要设计在dw层,尽量设计在
+           公共宽表层
+
+18.离线数据ods如何保证数据一致性?
+每天同步上一天15分钟和后一天15分钟的数据,利用where条件
+和业务时间就可以过滤掉这部分多余同步的数据保证数据是完整一天
+的数据。
+
+19.数据仓库的重点和难点是什么?
+数据仓库的最重要的是数据的质量,数据的准确性,因为数据是为决策服务的
+,如果提供的数据是错的,不仅不会带来收益,反而会让决策更失败,
+难点是如何让数据产生价值,创造价值;
+
+20.管理上有哪些经验?
+   
+21.如何让下面的人信服?
+
+22. 数据仓库建模阶段划分
+ 参考:https://www.cnblogs.com/zzjhn/p/3834732.html
+
+23.主题域如何划分
+参考:https://blog.csdn.net/qq_43315928/article/details/101001813
+
+24.主题划分的方法论:
+主题划分方法有两种:分别是对标法和归纳法。
+主题域模型设计要点：
+1.对标法；
+2.归纳法；
+以上两种方法都会面临同样的问题，即数据主题域划分的依据和可信度问题。如果针对 熟悉的行业或者相对成熟的行业领域，其实对标法，足够结果问题。而如果是非专业领域，则建议前期不必追究，后续逐步完善的应对策略。在没有对数据进行深入 分析的时候，主题域的分类，肯定是会有问题。即：
+1.成熟领域（熟悉）：直接对标；
+2.非常熟（熟悉）领域：总结归纳，逐步、迭代完善。
+参考:https://blog.csdn.net/weixin_33712881/article/details/86078445?utm_medium=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.channel_param&depth_1-utm_source=distribute.pc_relevant.none-task-blog-BlogCommendFromMachineLearnPai2-1.channel_param
+
+25.数据指标体系
+参考: https://blog.csdn.net/qq_34069667/article/details/107064289?%3E?utm_medium=distribute.pc_relevant.none-task-blog-baidujs-4
+
+26.数据仓库中事实表的类型:
+事实表分为三种类型：交易事实表、周期快照事实表和累积快照事实表。
+https://blog.csdn.net/nisjlvhudy/article/details/39235065
+
+27.元数据管理怎么做的呢?
+atlas支持元数据搜索与血缘,数据血缘的追溯达到了字段级别,支持hive、kafka 
+数据分类、集中策略引擎、数据血缘、安全和生命周期管理在内的元数据治理核心能力，
+其与Apache Falcon，Apache Ranger相互整合可以形成完整的数据治理解决方案,
+弊端:Atlas对Hive的元数据变更操作的捕获只支持hive CLI，不支持beeline/JDBC
+
+28.数据质量
+1).使用apache griffin二次开发后的数据质量管理
+2).精确度、完整性、及时性、唯一性、有效性、一致性
+参考:https://blog.csdn.net/vipshop_fin_dev/article/details/86362706
+目前检测哪些内容呢?
+
+29.实时数仓做过吗？采用什么架构？lambda有哪些优缺点？
+参考文档:https://www.cnblogs.com/coco2015/p/11299620.html
+1).批处理和流处理维护两套代码,维护成本高;
+2).资源占用增多：同样的逻辑计算两次，整体资源占用会增多
+30.如何看待kappa架构？iota架构呢？
+参考：https://www.sohu.com/a/228020781_115326
+
+Kappa 架构的批处理和流处理都放在了速度层上，这导致了这种架构是使用同一套代码来处理算法逻辑的。
+所以 Kappa 架构并不适用于批处理和流处理代码逻辑不一致的场景。
+
+31.分区和分桶的区别
+分区：是指按照数据表的某列或这某些列分为多个区，区从形式来讲可以理解为文件夹，
+      比如我们要收集某个大型网站的日志数据，一个网站每天的日志数据存在同一张表上，
+      由于每天回生成大量的数据，导数数据表的内容过于巨大，在查询的时候权标扫描耗费的资源非常多。可以按照日期对数据进行分区，不同日期的数据存放在不同的分区在，查询时只要指定分区字段的值就可以直接从该分区进行查找。
+分桶：
+      分桶是相对于分区进行更细粒度的划分，分桶将整个数据内容按照某列属性hash值进行划分，
+      如果按照name属性分为3个桶，就是对name属性值进行hash值对3取模，按照取模结果对数据进行分桶。
+      取模结果为0的数据记录存放在到一个文件.....取模为2的数据存放在一个文件。
+总结：
+     分区就是在HDFS上进行分目录，分桶就是分文件。
+
+32.left join 后加and条件与where条件有什么区别?
+left join 后加where 约束整个查询结果；
+left join 后加and，and条件不能限制左表，仅能限制右表。
+
+
+
+=================================================>
+hive之前总结:
+1. Hive数据倾斜--见大数据系列知识总结1
+2.hive 内部表和外部表区别(参考:https://blog.csdn.net/wxfghy/article/details/81361400)
+创建表时：创建内部表时，会将数据移动到数据仓库指向的路径；若创建外部表，仅记录数据所在的路径， 不对数据的位置做任何改变。
+删除表时：在删除表的时候，内部表的元数据和数据会被一起删除， 而外部表只删除元数据，不删除数据。这样外部表相对来说更加安全些.
+3.Hive中的排序关键字有哪些
+sort by ，order by ，cluster by ，distribute by
+
+sort by ：不是全局排序，其在数据进入reducer前完成排序
+order by ：会对输入做全局排序，因此只有一个reducer(多个reducer无法保证全局有序).只有一个reducer,会导致当输入规模较大时，需要较长的计算时间。
+cluster by ： 当distribute by 和sort by的字段相同时，等同于cluster by.可以看做特殊的distribute + sort
+distribute by ：按照指定的字段对数据进行划分输出到不同的reduce中。
+
+order by和sort by的区别:sort by是局部排序,order by是全局排序;
+
+4.Hive中追加导入数据的4种方式是什么？请写出简要语法
+
+
+从本地导入： load data local  inpath ‘/home/1.txt’ (overwrite)into table student;
+从Hdfs导入： load data inpath ‘/user/hive/warehouse/1.txt’  (overwrite)into table student;
+查询导入：  create table  student1 as select * from student;(也可以具体查询某项数据)
+查询结果导入：insert （overwrite）into table staff  select * from track_log;
+
+
+5. Hive导出数据有几种方式？如何导出数据
+
+1).用insert overwrite导出方式 
+导出到本地： 
+insert overwrite local directory ‘/home/robot/1/2’  rom format delimited fields terminated by ‘\t’ select * from staff;(递归创建目录)
+导出到HDFS 
+insert overwrite  directory ‘/user/hive/1/2’  rom format delimited fields terminated by ‘\t’ select * from staff;
+2).Bash shell覆盖追加导出 
+例如：$ bin/hive -e “select * from staff;”  > /home/z/backup.log
+3).Sqoop把hive数据导出到外部
+
+6.分区和分桶的区别
+分区
+	是指按照数据表的某列或某些列分为多个区，区从形式上可以理解为文件夹，比如我们要收集某个大型网站的日志数据，一个网站每天的日志数据存在同一张表上，由于每天会生成大量的日志，导致数据表的内容巨大，在查询时进行全表扫描耗费的资源非常多。
+那其实这个情况下，我们可以按照日期对数据表进行分区，不同日期的数据存放在不同的分区，在查询时只要指定分区字段的值就可以直接从该分区查找
+
+分桶
+	分桶是相对分区进行更细粒度的划分。
+分桶将整个数据内容按照某列属性值的hash值进行区分，如要按照name属性分为3个桶，就是对name属性值的hash值对3取摸，按照取模结果对数据分桶。
+如取模结果为0的数据记录存放到一个文件，取模为1的数据存放到一个文件，取模为2的数据存放到一个文件。
+
+ 
+7. Hive优化
+
+通用设置
+
+hive.optimize.cp=true：列裁剪 
+hive.optimize.prunner：分区裁剪 
+hive.limit.optimize.enable=true：优化LIMIT n语句 
+hive.limit.row.max.size=1000000： 
+hive.limit.optimize.limit.file=10：最大文件数
+
+
+本地模式(小任务)
+
+job的输入数据大小必须小于参数：hive.exec.mode.local.auto.inputbytes.max(默认128MB)
+job的map数必须小于参数：hive.exec.mode.local.auto.tasks.max(默认4)
+job的reduce数必须为0或者1 
+hive.exec.mode.local.auto.inputbytes.max=134217728 
+hive.exec.mode.local.auto.tasks.max=4 
+hive.exec.mode.local.auto=true 
+hive.mapred.local.mem：本地模式启动的JVM内存大小
+
+并发执行
+hive.exec.parallel=true ，默认为false 
+hive.exec.parallel.thread.number=8
+
+Strict Mode：
+hive.mapred.mode=true，严格模式不允许执行以下查询： 
+分区表上没有指定了分区
+没有limit限制的order by语句
+笛卡尔积：JOIN时没有ON语句
+
+
+动态分区
+hive.exec.dynamic.partition.mode=strict：该模式下必须指定一个静态分区 
+hive.exec.max.dynamic.partitions=1000 
+hive.exec.max.dynamic.partitions.pernode=100：在每一个mapper/reducer节点允许创建的最大分区数 
+DATANODE：dfs.datanode.max.xceivers=8192：允许DATANODE打开多少个文件
+
+
+推测执行
+mapred.map.tasks.speculative.execution=true 
+mapred.reduce.tasks.speculative.execution=true 
+hive.mapred.reduce.tasks.speculative.execution=true;
+
+多个group by合并
+hive.multigroupby.singlemar=true：当多个GROUP BY语句有相同的分组列，则会优化为一个MR任务
+
+虚拟列
+hive.exec.rowoffset：是否提供虚拟列
+
+分组
+两个聚集函数不能有不同的DISTINCT列，以下表达式是错误的： 
+INSERT OVERWRITE TABLE pv_gender_agg SELECT pv_users.gender, count(DISTINCT pv_users.userid), count(DISTINCT pv_users.ip) FROM pv_users GROUP BY pv_users.gender;
+SELECT语句中只能有GROUP BY的列或者聚集函数。
+
+
+Combiner聚合
+hive.map.aggr=true;在map中会做部分聚集操作，效率更高但需要更多的内存。 
+hive.groupby.mapaggr.checkinterval：在Map端进行聚合操作的条目数目
+
+避免数据倾斜问题:
+1).hive.groupby.skewindata=true：数据倾斜时负载均衡，当选项设定为true，生成的查询计划会有两个MRJob。
+2).大表和小表join的时候将小表放在前面,大表放在后面,避免倾斜
+3).大表和大表join时空key给默认值处理,避免倾斜 
+
+排序
+
+ORDER BY colName ASC/DESC 
+hive.mapred.mode=strict时需要跟limit子句 
+hive.mapred.mode=nonstrict时使用单个reduce完成排序 
+SORT BY colName ASC/DESC ：每个reduce内排序 
+DISTRIBUTE BY(子查询情况下使用 )：控制特定行应该到哪个reducer，并不保证reduce内数据的顺序 
+CLUSTER BY ：当SORT BY 、DISTRIBUTE BY使用相同的列时。
+
+
+合并小文件
+hive.merg.mapfiles=true：合并map输出 
+hive.merge.mapredfiles=false：合并reduce输出 
+hive.merge.size.per.task=256*1000*1000：合并文件的大小 
+hive.mergejob.maponly=true：如果支持CombineHiveInputFormat则生成只有Map的任务执行merge 
+hive.merge.smallfiles.avgsize=16000000：文件的平均大小小于该值时，会启动一个MR任务执行merge。
+
+自定义map/reduce数目
+减少map数目： 
+　　set mapred.max.split.size 
+　　set mapred.min.split.size 
+　　set mapred.min.split.size.per.node 
+　　set mapred.min.split.size.per.rack 
+　　set hive.input.format=org.apache.hadoop.hive.ql.io.CombineHiveInputFormat
+增加map数目： 
+当input的文件都很大，任务逻辑复杂，map执行非常慢的时候，可以考虑增加Map数，来使得每个map处理的数据量减少，从而提高任务的执行效率。
+假设有这样一个任务： 
+select data_desc, count(1), count(distinct id),sum(case when …),sum(case when ...),sum(…) from a group by data_desc
+如果表a只有一个文件，大小为120M，但包含几千万的记录，如果用1个map去完成这个任务，肯定是比较耗时的，这种情况下，我们要考虑将这一个文件合理的拆分成多个，这样就可以用多个map任务去完成。 
+　　set mapred.reduce.tasks=10; 
+　　create table a_1 as select * from a distribute by rand(123);
+这样会将a表的记录，随机的分散到包含10个文件的a_1表中，再用a_1代替上面sql中的a表，则会用10个map任务去完成。每个map任务处理大于12M（几百万记录）的数据，效率肯定会好很多。
+reduce数目设置： 
+参数1：hive.exec.reducers.bytes.per.reducer=1G：每个reduce任务处理的数据量
+参数2：hive.exec.reducers.max=999(0.95*TaskTracker数)：每个任务最大的reduce数目
+reducer数=min(参数2,总输入数据量/参数1)
+set mapred.reduce.tasks：每个任务默认的reduce数目。典型为0.99*reduce槽数，hive将其设置为-1，自动确定reduce数目。
+
+使用索引：
+hive.optimize.index.filter：自动使用索引 
+hive.optimize.index.groupby：使用聚合索引优化GROUP BY操作
+[
+hive  如何优化
+1）join 优化，尽量将小表放在 join 的左边，如果一个表很小可以采用 mapjoin
+2)排序优化，order by 一个 reduce 效率低，distirbute by +sort by 也可以实现全局排序
+3）使用分区，查询时可减少数据的检索，从而节省时间。
+]
+
+8.常见的hive知识点总结(https://blog.csdn.net/u011331430/article/details/79038103)简单看下
+
+
+9.三种分组的区别
+
+row_number：不管col2字段的值是否相等，行号一直递增，比如：有两条记录的值相等，但一个是第一，一个是第二
+rank：上下两条记录的col2相等时，记录的行号是一样的，但下一个col2值的行号递增N（N是重复的次数），比如：有两条并列第一，下一个是第三，没有第二
+dense_rank：上下两条记录的col2相等时，下一个col2值的行号递增1，比如：有两条并列第一，下一个是第二
+
+
+10.种常见的join
+
+10.1) Map-side Join
+
+mapJoin的主要意思就是，当链接的两个表是一个比较小的表和一个特别大的表的时候，我们把比较小的table直接放到内存中去，然后再对比较大的表格进行map操作。join就发生在map操作的时候，每当扫描一个大的table中的数据，就要去去查看小表的数据，哪条与之相符，继而进行连接。这里的join并不会涉及reduce操作。map端join的优势就是在于没有shuffle，真好。在实际的应用中，我们这样设置： 
+***1.   set hive.auto.convert.join=true;  
+这样设置，hive就会自动的识别比较小的表，继而用map Join来实现两个表的联合。看看下面的两个表格的连接。
+
+<property>
+  <name>hive.auto.convert.join.noconditionaltask.size</name>
+  <value>10000000</value> The default is 10MB
+ </property>1234
+
+Distributed Cache是分布式缓存的一种实现，它在整个MapReduce框架中起着相当重要的作用，他可以支撑我们写一些相当复杂高效的分布式程
+
+这里的第一句话就是运行本地的map join任务，继而转存文件到XXX.hashtable下面，在给这个文件里面上传一个文件进行map join，之后才运行了MR代码去运行计数任务。说白了，在本质上mapjoin根本就没有运行MR进程，仅仅是在内存就进行了两个表的联合。
+
+mapjoin使用场景 
+1.关联操作中有一张表非常小 
+2.不等值的链接操作
+
+自动执行
+
+set hive.auto.convert.join=true;
+hive.mapjoin.smalltable.filesize=25;默认值是25mb   12
+
+<property>
+  <name>hive.mapjoin.smalltable.filesize</name>
+  <value>25000000</value>
+ </property>1234
+
+手动执行 A为小表  如果A表超过25M，还想使用map join; 
+select /+mapjoin(A)/ f.a,f.b from A t join B f on(f.a==t.a)
+
+10.2).Reduce-side Join
+
+***hive join操作默认使用的就是reduce join 
+Reduce-side Join原理上要简单得多，它也不能保证相同key但分散在不同dataset中的数据能够进入同一个Mapper，整个数据集合的排序 
+在Mapper之后的shuffle过程中完成。相对于Map-side Join，它不需要每个Mapper都去读取所有的dataset，这是好处，但也有坏处， 
+即这样一来Mapper之后需要排序的数据集合会非常大，因此shuffle阶段的效率要低于Map-side Join。 
+***reduce side join是一种最简单的join方式，其主要思想如下： 
+在map阶段，map函数同时读取两个文件File1和File2，为了区分两种来源的key/value数据对，对每条数据打一个标签（tag）
+
+semi  join  小表对大表  是reudce join的变种 map阶段过滤掉不需要join的字段 相当于Hivw SQL加的where过滤 
+
+10.3).SMB Join（sort merge bucket）
+
+SMB 存在的目的主要是为了解决大表与大表间的 Join 问题，分桶其实就是把大表化成了“小表”，然后 Map-Side Join 解决之，这是典型的分而治之的思想。
+
+set hive.enforce.bucketing=true;
+set hive.enforce.sorting=true;
+
+
+11.Hive数据仓库于关系型数据库的异同 0 0/30 * * * ?
+
+ (1）由于Hive采用了SQL的查询语言HQL，因此很容易将Hive理解为数据库。其实从结构上来看，Hive和数据库除了拥有类似的查询语言，
+     再无类似之处。
+（2）数据存储位置。  hdfs   raw local fs
+（3）数据格式。 分隔符
+（4）数据更新。hive读多写少。Hive中不支持对数据的改写和添加，所有的数据都是在加载的时候中确定好的。
+INSERT INTO … VALUES添加数据，使用UPDATE … SET修改数据  不支持的
+HDFS 一次写入多次读取
+（5）执行。hive通过MapReduce来实现的  而数据库通常有自己的执行引擎。 
+（6）执行延迟。由于没有索引，需要扫描整个表，因此延迟较高。另外一个导致Hive执行延迟高的因素是MapReduce框架
+（7）可扩展性
+（8）数据规模。
+
+
+12.where和having的区别?
+Where是一个约束声明，使用Where来约束来之数据库的数据，Where是在结果返回之前起作用的，且Where中不能使用聚合函数。
+Having是一个过滤声明，是在查询返回结果集以后对查询结果进行的过滤操作，在Having中可以使用聚合函数。
+
+
+13.count(1)、count(*)、sum(列)的区别(参考:https://blog.csdn.net/yangwenlei222/article/details/81133571)
+1).内容
+count(1),所有行都用1代替，统计行数
+count(*)所有行数包括NULL
+count(columnname) columnname非NULL的行数
+2).速度
+列名为主键，count(列名)优于count(1) 
+列名不为主键，count(1)会比count(列名)快  
+如果表多个列并且没有主键，则 count（1） 的执行效率优于 count（*）  
+如果有主键，则 select count（主键）的执行效率是最优的  
+如果表只有一个字段，则 select count（*）最优。
+
+count(1)、count(*)包括null;count(列名):不包括null值;
+
+14.多重分组grouping sets和with cube的区别(http://lxw1234.com/archives/2015/04/193.htm)
+ grouping sets:指定group by的字段进行多种方式分组,grouping sets中()代表不分组,其他子分组之后与不分组结果一致
+ with cube:列出所有的分组组合方法
+ 
+15.hive实现关系型数据库如mysql的自增序列?
+
+1) 用row_number()函数生成代理键
+insert into tbl_dim  
+select row_number() over (order by tbl_stg.id) + t2.sk_max, tbl_stg.*  
+from tbl_stg
+cross join (select coalesce(max(sk),0) sk_max from tbl_dim) t2;         
+
+上面语句中，先查询维度表中已有记录最大的代理键值，如果维度表中还没有记录，
+利用coalesce函数返回0。然后使用cross join连接生成过渡表和最大代理键值的笛卡尔集，
+最后使用row_number()函数生成行号，并将行号与最大代理键值相加的值，作为新装载记录的代理键。
+
+2) 用UDFRowSequence生成代理键
+add jar hdfs:///user/hive-contrib-2.0.0.jar; 添加hive自带的自增序列Jar包到hdfs 
+create temporary function row_sequence as 'org.apache.hadoop.hive.contrib.udf.udfrowsequence'; 
+
+insert into tbl_dim  
+select row_sequence() + t2.sk_max, tbl_stg.*  
+from tbl_stg cross join (select coalesce(max(sk),0) sk_max from tbl_dim) t2
+
+
+
+16.hive如何实现分区的？
+hive  是如何实现分区的？
+建表语句：
+create table tablename (id) partitioned by (dt string)
+增加分区：
+alter table tablenname add partition (dt = ‘2016-03-06’)
+删除分区：
+alter table tablename drop partition (dt = ‘2016-03-06’)
+
+
+17.hive 持 支持 not in  吗？
+hive 1.2.1版本之前是不支持not in操作的,可以用 left join 实现此功能
+hive 1.2.1版本开始支持not join操作  
+(注意:hive也是1.2x版本之后支持insert 和update操作,不支持delete操作,但是insert和update操作都是单条执行,效率非常低,
+大数据生产中很少使用)
+
+
+18.Hive  有哪些方式保存元数据，各有哪些优缺点。
+1)存储于 derby 数据库，此方法只能开启一个 hive 客户端，不推荐使用
+2)存储于 mySQL 数据库中，可以多客户端连接，推荐使用。
+
+
+19.hive  能像关系数据库那样，建多个库吗？
+可以建立多个库，多库多表都支持,且可支持跨库跨表join等
+
+
+
+20.hive 式 中的压缩格式 RCFile、 、 TextFile、 、 SequenceFile  各有什么区别？
+TextFile：默认格式，数据不做压缩，磁盘开销大，数据解析开销大
+SequenceFile：Hadoop API提供的一种二进制文件支持，使用方便，可分割，可压缩，支
+持三种压缩，NONE，RECORD，BLOCK
+RCFILE 是一种行列存储相结合的方式。首先，将数据按行分块，保证同一个 record 在同
+一个块上，避免读一个记录读取多个 block。其次，块数据列式存储，有利于数据压缩和快
+速的列存取。数据加载的时候性能消耗大，但具有较好的压缩比和查询响应。
+
+
+
+21. hive 于 相对于 Oracle/Mysql(关系型数据框) 来说有那些优点？
+1）存储，hive 存储在 hdfs 上，oracle 存储在本地文件系统
+2）扩展性，hive 可以扩展到数千节点，oracle 理论上只可扩展到 100 台左右
+3）单表存储，数据量大 hive 可以分区分桶，oracle 数据量大只能分表。
+
+13739289901
+
+22.hive行转列列转行总结:https://www.cnblogs.com/yfb918/p/10411755.html
+collect_set、collect_list 列转行
+lateral view explode() 行转列
+23.hive执行计划?如何查看hive执行计划
+
+24.hive sql写代码  找出各科前三名
+字段:
+学号:stu_id
+姓名:name 
+科目:subject
+分数:score
+
+select * from (
+		select* row_number() over (partition by subject order by score) as 排名 from student
+) where 排名 小于等于 3；
+
+25.select id ，sum （1）from tablegroup by id分析其发生数据倾斜的原因；
+   group by操作时由于group by的key数据各个分区分布不均匀导致数据发生倾斜;
+   
+26.简述发生数据倾斜的原因及解决方案；
+   
+
+数据仓库知识点
+1.数据仓库知识点扫盲:
+1).https://www.cnblogs.com/muchen/p/5305658.html
+2).https://www.cnblogs.com/muchen/p/5310732.html
+3).https://www.cnblogs.com/muchen/p/5318808.html
+参考:阿里巴巴数据仓库第一轮面试:https://www.kanzhun.com/gsmsh10924759.html
+2.数据仓库和数据库的区别?
+有两个层面/角度来回答这个有趣的问题：
+1),逻辑层面/概念层面：数据库通常更关注业务交易处理（OLTP），而数据仓库更关注数据分析层面（OLAP），由此产生的数据库模型上也会有很大的差异。
+数据库通常追求交易的速度，交易完整性，数据的一致性，等等，在数据库模型上主要遵从范式模型（1NF，2NF，3NF，等等），从而尽可能减少数据冗余，保证引用完整性；
+而数据仓库强调数据分析的效率，复杂查询的速度，数据之间的相关性分析，所以在数据库模型上，数据仓库喜欢使用多维模型，从而提高数据分析的效率。
+2,产品实现层面：数据库和数据仓库软件是有些不同的，数据库通常使用行式存储，如Oracle, SQL Server，而数据仓库倾向使用列式存储，如SAP IQ，Hive
+
+
+25.orc格式底层如何实现的?
+在ORC格式的hive表中，记录首先会被横向的切分为多个stripes，然后在每一个stripe内数据以列为单位进行存储，所有列的内容都保存在同一个文件中。每个stripe的默认大小为256MB，相对于RCFile每个4MB的stripe而言，更大的stripe使ORC的数据读取更加高效。
+
+
+
+
+
+
+
+
+3.简述什么是数据仓库
+	数据仓库（Data Warehouse）是一个面向主题的（Subject Oriented）、集成的（Integrate）、相对稳定的（Non-Volatile）、
+反映历史变化（Time Variant）的数据集合，用于支持管理决策。
+
+4.数据仓库三层结构设计
+ODS——操作性数据(Operational Data Store),也叫原始数据层或操作数据存储层
+DW——数据仓库(DataWarehouse)
+DM——数据集市(Data Market)
+	数据仓库的整理架构，各个系统的元数据通过ETL同步到操作性数据仓库ODS中，对ODS数据进行面向主题域建模形成DW（数据仓库），
+DM是针对某一个业务领域建立模型，具体用户（决策层）查看DM生成的报表。
+
+ODS、DW、DM三者的区别?
+ODS:属于操作型存储,存储的是通过ETL同步过来的和生产如mysql中未加工的原始数据,反应数据的当前情况
+DW:存储的是一个面向主题,经过join等加工后的明细数据,反映历史变化 
+DM:数据集市,是各个下游应用根据dw数据为分析决策而进行count、sum、group by等分组聚合加工后的结果数据
+
+为什么要分层设计?
+	为方便管理历史数据,为企业各个应用方更方便快捷使用数据,提供反应历史变化和支持业务建模,方便决策。
+
+5.etl了解吗(参考:https://www.cnblogs.com/muchen/p/5318808.html)
+了解一些的,ETL：抽取、转换、加载
+
+ 
+6.如何查找和删除表中的重复数据？给出方法或SQL。
+查找表中重复数据
+select ID1,email from email e1
+where rowid  < (select max(rowid) from email e2 where e1.email = e2.email AND e1.id1 = e2.id1);
+
+删除表中重复数据
+ delete ID1,email from email e1
+ where rowid  < (select max(rowid) from email e2 where e1.email = e2.email AND e1.id1 = e2.id1);
+ select ID1,email from email e1
+
+7.数据仓库中缓慢变化维实现方案?你们公司怎么设计的(https://bbs.csdn.net/topics/230033248)
+
+Type 1 SCD :不记录历史数据,新数据覆盖旧数据
+Type 2 SCD: 保存多条记录,直接新添一条记录，同时保留原有记录，并用单独的专用的字段保存区别
+Type 3 SCD：添加历史列，用不同的字段保存变化痕迹.它只能保存两次变化记录.适用于变化不超过两次的维度。
+
+
+数据仓库拉链表:https://www.cnblogs.com/zuifangxiu/articles/6475179.html
+
+8.数据仓库hive代理键的实现?参考hive总结的两种方式即rownumer over和hive自带的sequence方式
+
+9.数据仓库有哪些特性(或特点)
+1).面向主题
+2).集成性
+3).企业范围
+4).历史性
+5).时变性
+
+10.维度建模、事实表和维度表的理解
+	维度建模(dimensional modeling)是专门用于分析型数据库、数据仓库、数据集市建模的方法。
+    它本身属于一种关系建模方法，但和之前在操作型数据库中介绍的关系建模方法相比增加了两个概念：
+1). 维度表(dimension)
+   表示对分析主题所属类型的描述。比如"昨天早上张三在京东花费200元购买了一个皮包"。那么以购买为主题进行分析，可从这段信息中提取三个维度：时间维度(昨天早上)，地点维度(京东), 商品维度(皮包)。通常来说维度表信息比较固定，且数据量小。
+
+2). 事实表(fact table)
+   表示对分析主题的度量。比如上面那个例子中，200元就是事实信息。事实表包含了与各维度表相关联的外码，并通过JOIN方式与维度表关联。事实表的度量通常是数值类型，且记录数会不断增加，表规模迅速增长。
+
+11.维度建模的三种模式(参考:https://www.cnblogs.com/muchen/p/5310732.html)
+1).星形模式
+2).雪花模式
+3).星座模式  
+三者的区别:  雪花模式是将星型模式的维表进一步划分，使各维表均满足规范化设计。而星座模式则是允许星形模式中出现多个事实表。
+
+
+12.数据仓库有哪些建模方式?(参考:https://www.cnblogs.com/muchen/p/5310732.html)
+1).规范化数据仓库
+
+2).维度建模 
+
+13.什么叫切片和切块?(参考:https://www.cnblogs.com/muchen/p/5318808.html)
+在数据立方体的某一维度上选定一个维成员的操作叫切片，而对两个或多个维执行选择则叫做切块
+
+14.上卷和下钻(参考:https://www.cnblogs.com/muchen/p/5318808.html)
+上卷可以理解为"无视"某些维度；下钻则是指将某些维度进行细分
+
+
+切片:数据立方体的某一维度上选定一个成员的操作叫切片;
+     数据立方体的某一维度上选定多个成员的操作叫切块;
+
+
+
+数据仓库的两种建模方法
+一、范式建模
+Inmon提出的集线器的自上而下（EDW-DM）的数据仓库架构。操作型或事务型系统的数据源，通过ETL抽取转换和加载到数据仓库的ODS层，然后通过ODS的数据建设原子数据的数据仓库EDW，EDW不是多维格式的，不方便上层应用做数据分析，所以需要通过汇总建设成多维格式的数据集市层。优势：易于维护，高度集成；劣势：结构死板，部署周期较长
+范式建模应用在EDW层
+一个符合第三范式的关系必须具有以下三个条件:
+1. 每个属性的值唯一,不具有多义性;
+2. 每个非主属性必须完全依赖于整个主键,而非主键的一部分;
+3. 每个非主属性不能依赖于其他关系中的属性
+
+,因为这样的话,这种属性应该归到其他关系中去。
+但是由于EDW的数据是原子粒度的，数据量比较大，完全规范的3范式在数据的交互的时候效率比较低下，所以通常会根据实际情况在事实表上做一些冗余，减少过多的数据交互。
+
+二、维度建模
+Kimball提出的总线式的自下而上（DM-DW）的数据仓库架构。同样的，操作型或事务型系统的数据源，通过ETL抽取转换和加载到数据仓库的ODS层，然后通过ODS的数据，利用维度建模方法建设一致维度的数据仓库。通过一致性维度可以将数据集市联系在一起，由所有的数据集市组成数据仓库。优势：构建迅速，最快的看到投资回报率，敏捷灵活；劣势：作为企业资源不太好维护，结构复杂，数据集市集成困难。
+星型模型（推荐）和雪花模型
+
+
+
+15.OLAP的架构模式
+MOLAP:MOLAP架构会生成一个新的多维数据集，也可以说是构建了一个实际数据立方体
+ROLAP:ROLAP架构并不会生成实际的多维数据集，而是使用星形模式以及多个关系表对数据立方体进行模拟。
+HOLAP:这种架构综合参考MOLAP和ROLAP而采用一种混合解决方案，将某些需要特别提速的查询放到MOLAP引擎，其他查询则调用ROLAP引擎。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
